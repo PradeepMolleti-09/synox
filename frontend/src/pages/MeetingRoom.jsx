@@ -12,6 +12,7 @@ import { useToast } from '../context/ToastContext';
 import { encryptFile, uploadToIPFS, getSessionSignatureMessage } from '../utils/storage';
 import io from 'socket.io-client';
 import process from 'process';
+import { motion, AnimatePresence } from 'framer-motion';
 
 window.process = process;
 
@@ -900,7 +901,8 @@ const MeetingRoom = () => {
     // MEETING ROOM VIEW
     // ─────────────────────────────────────────────────────────────────────────
     return (
-        <div ref={meetingContainerRef} className="h-screen bg-[#111] text-white flex flex-col font-sans overflow-hidden pt-20">
+        <div ref={meetingContainerRef} className="h-screen bg-black text-white flex flex-col font-sans overflow-hidden">
+            {/* Header (Already provided by App layout usually, but here custom) */}
             {/* Header */}
             <header className="h-16 px-6 flex items-center justify-between border-b border-white/5 z-30 glass shadow-2xl">
                 <div className="flex items-center gap-4">
@@ -930,11 +932,14 @@ const MeetingRoom = () => {
                 </button>
             </header>
 
-            <div className="flex-1 flex overflow-hidden relative">
-                {/* Video Grid - Google Meet Style */}
-                <main className="flex-1 p-4 md:p-6 overflow-hidden bg-zinc-950 flex flex-col relative">
-                    <div className="flex-1 overflow-y-auto min-h-0 flex items-center justify-center p-4">
-                        <div className={`grid gap-4 w-full max-w-7xl mx-auto h-full auto-rows-fr ${peers.length === 0 ? 'grid-cols-1' : peers.length === 1 ? 'grid-cols-1 max-w-4xl' : peers.length === 2 ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+            <div className="flex-1 flex flex-col overflow-hidden relative">
+                {/* Video Grid - Full Width Immersive */}
+                <main className="flex-1 overflow-hidden bg-black flex flex-col relative w-full">
+                    <div className="flex-1 overflow-y-auto min-h-0 flex items-center justify-center">
+                        <div className={`grid gap-2 w-full h-full p-2 auto-rows-fr ${peers.length === 0 ? 'grid-cols-1' :
+                                peers.length === 1 ? 'grid-cols-1 md:grid-cols-2' :
+                                    peers.length === 2 ? 'grid-cols-2 md:grid-cols-3' :
+                                        'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4'
                             }`}>
                             {/* All Participants except Me */}
                             {peers
@@ -961,59 +966,102 @@ const MeetingRoom = () => {
                         </div>
                     </div>
 
-                    {/* Floating Self Video - Bottom Right */}
-                    <div className={`fixed bottom-28 right-8 w-60 md:w-80 aspect-video rounded-2xl overflow-hidden shadow-2xl border-2 transition-all duration-500 z-50 group ${isSpeaking ? 'border-blue-500 shadow-[0_0_40px_rgba(59,130,246,0.4)]' : 'border-white/20 hover:border-white/40'}`}>
+                    {/* Movable Self Video - Drag Enabled */}
+                    <motion.div
+                        drag
+                        dragConstraints={meetingContainerRef}
+                        dragElastic={0.1}
+                        whileDrag={{ scale: 1.05, cursor: 'grabbing' }}
+                        className={`fixed bottom-28 right-8 w-48 md:w-64 aspect-video rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.8)] border-2 transition-all duration-300 z-[60] group cursor-grab touch-none ${isSpeaking ? 'border-blue-500 shadow-[0_0_40px_rgba(59,130,246,0.3)]' : 'border-white/10 hover:border-white/30'}`}
+                    >
                         <video ref={localVideoRef} autoPlay muted playsInline
                             className={`w-full h-full object-cover transform scale-x-[-1] ${!isVideoOn ? 'hidden' : ''}`} />
                         {!isVideoOn && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900">
-                                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${account}`} alt="Me" className="w-16 h-16 rounded-full border-2 border-white/5 shadow-2xl" />
-                                <p className="mt-2 text-zinc-600 font-mono text-[8px] uppercase tracking-widest leading-none">Camera Off</p>
+                                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${account}`} alt="Me" className="w-12 h-12 rounded-full border border-white/10 shadow-2xl" />
+                                <p className="mt-2 text-zinc-600 font-mono text-[6px] uppercase tracking-widest leading-none">Camera Off</p>
                             </div>
                         )}
                         {raisedHands['me'] && (
-                            <div className="absolute top-2 left-2 bg-blue-500 p-1.5 rounded-lg animate-bounce border border-white/20">
-                                <Hand size={12} className="text-white fill-white" />
+                            <div className="absolute top-2 left-2 bg-blue-500 p-1 rounded-lg animate-bounce border border-white/20">
+                                <Hand size={10} className="text-white fill-white" />
                             </div>
                         )}
-                        <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg glass border-white/10 flex items-center gap-1.5">
-                            <span className="text-[8px] font-black tracking-widest uppercase">YOU {isHost && "(HOST)"}</span>
-                            {isScreenSharing && <Monitor size={10} className="text-blue-400" />}
-                            {isSpeaking && <Volume2 size={10} className="text-blue-500 animate-pulse" />}
+                        <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/5 flex items-center gap-1.5 pointer-events-none">
+                            <span className="text-[7px] font-black tracking-widest uppercase">YOU {isHost && "(HOST)"}</span>
+                            {isScreenSharing && <Monitor size={8} className="text-blue-400" />}
+                            {isSpeaking && <Volume2 size={8} className="text-blue-500 animate-pulse" />}
                         </div>
-                    </div>
+                    </motion.div>
                 </main>
 
-                {/* Sidebar Backdrop */}
-                {showSidebar && (
-                    <div className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-30" onClick={() => setShowSidebar(false)} />
-                )}
-
-                {/* Sidebar */}
-                <aside className={`fixed lg:relative inset-y-0 right-0 w-80 h-full border-l border-white/5 glass transition-all duration-500 transform z-40 ${showSidebar ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'}`}>
-                    <div className="flex p-4 border-b border-white/5 gap-2">
-                        <div className="flex-1 py-2 px-4 rounded-lg text-[10px] font-black tracking-widest bg-white text-black text-center">PROTOCOL LEDGER</div>
-                        <button onClick={() => setShowSidebar(false)} className="lg:hidden p-2 text-zinc-500 hover:text-white"><X size={18} /></button>
-                    </div>
-                    <div className="p-4 overflow-y-auto h-[calc(100vh-120px)]">
-                        <div className="space-y-4">
-                            {events.map(e => (
-                                <div key={e.id} className="p-3 bg-white/5 rounded-xl border border-white/5">
-                                    <div className="flex justify-between items-center mb-1">
-                                        <span className="text-[8px] font-black tracking-widest text-zinc-500 uppercase">{e.type}</span>
-                                        <span className="text-[8px] font-mono text-zinc-600">{e.time}</span>
+                {/* Protocol Ledge - Mobile UI Nav Style Sheet */}
+                <AnimatePresence>
+                    {showSidebar && (
+                        <>
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                onClick={() => setShowSidebar(false)}
+                                className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100]"
+                            />
+                            <motion.aside
+                                initial={{ y: "100%" }}
+                                animate={{ y: 0 }}
+                                exit={{ y: "100%" }}
+                                transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                                className="fixed bottom-0 left-1/2 -translate-x-1/2 w-[98%] max-w-3xl max-h-[70vh] glass-card rounded-t-[2.5rem] border-x border-t border-white/10 z-[110] overflow-hidden flex flex-col shadow-[0_-20px_50px_rgba(0,0,0,0.5)]"
+                            >
+                                <div className="p-2 flex flex-col items-center">
+                                    <div className="w-12 h-1 bg-white/20 rounded-full mb-4 mt-2" />
+                                    <div className="w-full flex items-center justify-between px-6 mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+                                            <span className="text-[10px] font-black tracking-[0.3em] uppercase opacity-50">Protocol Ledger Shell</span>
+                                        </div>
+                                        <button onClick={() => setShowSidebar(false)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-all">
+                                            <X size={18} />
+                                        </button>
                                     </div>
-                                    <p className="text-[11px] text-zinc-300 leading-relaxed tracking-tight">{e.msg}</p>
+
+                                    {/* Mobile Nav Style Tabs inside Ledge */}
+                                    <div className="w-[90%] bg-white/5 rounded-2xl p-1 mb-6 flex gap-1 border border-white/5">
+                                        <button className="flex-1 py-2 rounded-xl bg-white text-black font-black text-[9px] tracking-widest uppercase">Events</button>
+                                        <button className="flex-1 py-2 rounded-xl text-zinc-500 font-bold text-[9px] tracking-widest uppercase hover:text-white transition-colors">Nodes</button>
+                                        <button className="flex-1 py-2 rounded-xl text-zinc-500 font-bold text-[9px] tracking-widest uppercase hover:text-white transition-colors">Blocks</button>
+                                    </div>
                                 </div>
-                            ))}
-                            {events.length === 0 && (
-                                <div className="text-center text-[10px] text-zinc-600 mt-20 uppercase tracking-widest font-mono">
-                                    Connecting to protocol node...
+
+                                <div className="flex-1 overflow-y-auto px-6 pb-8 space-y-3 custom-scrollbar">
+                                    {events.map(e => (
+                                        <motion.div
+                                            initial={{ opacity: 0, x: -10 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            key={e.id}
+                                            className="p-4 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-all group"
+                                        >
+                                            <div className="flex justify-between items-center mb-2">
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`w-1 h-1 rounded-full ${e.type === 'BLOCKCHAIN' ? 'bg-blue-500' : 'bg-green-500'}`} />
+                                                    <span className="text-[8px] font-black tracking-widest text-zinc-500 uppercase">{e.type}</span>
+                                                </div>
+                                                <span className="text-[8px] font-mono text-zinc-600 group-hover:text-blue-500 transition-colors uppercase">{e.time}</span>
+                                            </div>
+                                            <p className="text-[11px] text-zinc-400 font-medium leading-relaxed tracking-tight group-hover:text-zinc-200 transition-colors">{e.msg}</p>
+                                        </motion.div>
+                                    ))}
+                                    {events.length === 0 && (
+                                        <div className="py-20 flex flex-col items-center opacity-20">
+                                            <Activity className="animate-spin mb-4" />
+                                            <p className="text-[10px] font-mono uppercase tracking-[0.3em]">Synching with blockchain...</p>
+                                        </div>
+                                    )}
                                 </div>
-                            )}
-                        </div>
-                    </div>
-                </aside>
+                            </motion.aside>
+                        </>
+                    )}
+                </AnimatePresence>
             </div>
 
             {/* Footer */}
