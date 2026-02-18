@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: synox-signaling
+    env: node
+    region: oregon
+    plan: free
+    rootDir: signaling
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: PORT
+        value: 10000
