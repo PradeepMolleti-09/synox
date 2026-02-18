@@ -85,6 +85,16 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('end-meeting', (payload) => {
+        const roomId = payload.roomId || socket._roomId;
+        if (!roomId || !rooms[roomId]) return;
+        rooms[roomId].forEach(userId => {
+            if (userId !== socket.id) {
+                io.to(userId).emit('meeting-ended');
+            }
+        });
+    });
+
     // ── Disconnect ────────────────────────────────────────────────────────────
     socket.on('disconnect', (reason) => {
         console.log(`[-] Disconnected: ${socket.id} (${reason})`);

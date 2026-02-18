@@ -48,6 +48,7 @@ const RemoteVideo = ({ stream, peerId, isHandRaised, isSpeaking, isVideoOn }) =>
                 ref={ref}
                 autoPlay
                 playsInline
+                data-peer={peerId}
                 className={`w-full h-full object-cover ${!isVideoOn ? 'hidden' : ''}`}
             />
             {!isVideoOn && (
@@ -438,21 +439,41 @@ const MeetingRoom = () => {
         const socket = socketRef.current;
         if (!socket) return;
         socket.on('peer-status', ({ from, payload }) => {
-            setRemoteStatus(prev => ({ ...prev, [from]: { ...prev[from], ...payload } }));
+            setRemoteStatus(prev => ({
+                ...prev,
+                [from]: { ...prev[from], ...payload }
+            }));
+
+            // Sync specific states like hand raise and recording status
+            if (payload.hand !== undefined) {
+                setRaisedHands(prev => ({ ...prev, [from]: payload.hand }));
+            }
+            if (payload.isRecording !== undefined) {
+                setIsRecording(payload.isRecording);
+                addEvent("NETWORK", payload.isRecording ? "Host started session recording." : "Session recording stopped.");
+            }
         });
-        return () => socket?.off('peer-status');
-    }, [hasJoined]);
+
+        socket.on('meeting-ended', () => {
+            addEvent("NETWORK", "Host has finalized and closed the meeting room.");
+            showToast("Meeting finalized by host. Redirecting...", "success");
+            setTimeout(() => {
+                navigate('/dashboard');
+                // Clean up tracks
+                if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop());
+            }, 3000);
+        });
+
+        return () => {
+            socket?.off('peer-status');
+            socket?.off('meeting-ended');
+        };
+    }, [hasJoined, navigate, showToast]);
 
     const toggleHand = () => {
         const newState = !raisedHands['me'];
         setRaisedHands(prev => ({ ...prev, me: newState }));
-        if (socketRef.current) {
-            socketRef.current.emit('broadcast-status', {
-                roomId: huddleId,
-                payload: { hand: newState },
-                type: 'hand'
-            });
-        }
+        broadcastStatus({ hand: newState });
         addEvent("PROCESS", newState ? "Hand raised." : "Hand lowered.");
     };
 
@@ -506,37 +527,142 @@ const MeetingRoom = () => {
         broadcastStatus({ isAudioOn: newState });
     };
 
-    // ── Recording ─────────────────────────────────────────────────────────────
+    // ── High-Quality Grid Recording Logic ────────────────────────────────────
+    const canvasRef = useRef(null);
+    const canvasStreamRef = useRef(null);
+    const animationFrameRef = useRef(null);
+
+    const startRecording = () => {
+        const stream = localStreamRef.current;
+        if (!stream) { showToast("No media stream found.", "error"); return; }
+
+        recordedChunksRef.current = [];
+        const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+            .find(t => MediaRecorder.isTypeSupported(t));
+
+        // 1. Setup Audio Mixing
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const dest = audioCtx.createMediaStreamDestination();
+
+        // Mix Local Audio
+        if (stream.getAudioTracks().length > 0) {
+            const localSource = audioCtx.createMediaStreamSource(new MediaStream([stream.getAudioTracks()[0]]));
+            localSource.connect(dest);
+        }
+
+        // Mix Peer Audios
+        peers.forEach(p => {
+            if (p.stream && p.stream.getAudioTracks().length > 0) {
+                try {
+                    const peerSource = audioCtx.createMediaStreamSource(new MediaStream([p.stream.getAudioTracks()[0]]));
+                    peerSource.connect(dest);
+                } catch (e) { console.warn("Audio mixing failed for peer", p.peerID, e); }
+            }
+        });
+
+        // 2. Setup Video Grid Canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = 1280;
+        canvas.height = 720;
+        const ctx = canvas.getContext('2d');
+
+        const drawGrid = () => {
+            if (!isRecording && !mediaRecorderRef.current) return;
+
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const allParticipants = [
+                { id: 'me', stream: localStreamRef.current, video: localVideoRef.current, name: 'You' },
+                ...peers.filter(p => p.stream).map(p => ({
+                    id: p.peerID,
+                    stream: p.stream,
+                    // We need a stable video element for each peer to draw to canvas
+                    // We can reuse the elements from the UI if we have refs, 
+                    // but it's safer to use the actual video components' current source
+                    video: document.querySelector(`video[data-peer="${p.peerID}"]`),
+                    name: `Peer ${p.peerID.slice(0, 4)}`
+                }))
+            ];
+
+            const n = allParticipants.length;
+            const cols = Math.ceil(Math.sqrt(n));
+            const rows = Math.ceil(n / cols);
+            const w = canvas.width / cols;
+            const h = canvas.height / rows;
+
+            allParticipants.forEach((p, i) => {
+                const r = Math.floor(i / cols);
+                const c = i % cols;
+                const x = c * w;
+                const y = r * h;
+
+                if (p.video && p.video.readyState >= 2) {
+                    // Maintain aspect ratio while covering the grid cell
+                    const videoW = p.video.videoWidth;
+                    const videoH = p.video.videoHeight;
+                    const scale = Math.max(w / videoW, h / videoH);
+                    const drawW = videoW * scale;
+                    const drawH = videoH * scale;
+                    const drawX = x + (w - drawW) / 2;
+                    const drawY = y + (h - drawH) / 2;
+
+                    ctx.drawImage(p.video, drawX, drawY, drawW, drawH);
+
+                    // Add label
+                    ctx.fillStyle = "rgba(0,0,0,0.5)";
+                    ctx.fillRect(x + 10, y + h - 30, 100, 20);
+                    ctx.fillStyle = "#fff";
+                    ctx.font = "12px monospace";
+                    ctx.fillText(p.name, x + 15, y + h - 16);
+                } else {
+                    // Placeholder for peer without video
+                    ctx.fillStyle = "#111";
+                    ctx.fillRect(x, y, w, h);
+                    ctx.fillStyle = "#444";
+                    ctx.font = "20px sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.fillText(p.name, x + w / 2, y + h / 2);
+                }
+            });
+
+            animationFrameRef.current = requestAnimationFrame(drawGrid);
+        };
+
+        requestAnimationFrame(drawGrid);
+
+        // 3. Combine Canvas Video + Mixed Audio
+        const canvasStream = canvas.captureStream(30);
+        const combinedStream = new MediaStream([
+            ...canvasStream.getVideoTracks(),
+            ...dest.stream.getAudioTracks()
+        ]);
+
+        const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 2500000 });
+        recorder.ondataavailable = e => { if (e.data?.size > 0) recordedChunksRef.current.push(e.data); };
+        recorder.onstop = () => {
+            cancelAnimationFrame(animationFrameRef.current);
+            audioCtx.close();
+            addEvent("SUCCESS", "Grid recording finalized.");
+        };
+
+        recorder.start(1000);
+        mediaRecorderRef.current = recorder;
+        setIsRecording(true);
+        broadcastStatus({ isRecording: true });
+        addEvent("PROCESS", "Secure protocol recording (Grid-View) initiated.");
+        showToast("Recording started and synced with peers.", "info");
+    };
+
     const toggleRecording = () => {
         if (!isHost) return;
         if (!isRecording) {
-            const stream = localStreamRef.current;
-            if (!stream) { showToast("No media stream found.", "error"); return; }
-            recordedChunksRef.current = [];
-            const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
-                .find(t => MediaRecorder.isTypeSupported(t));
-            if (!mimeType) { showToast("No supported recording format.", "error"); return; }
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const dest = audioCtx.createMediaStreamDestination();
-            if (stream.getAudioTracks().length > 0) audioCtx.createMediaStreamSource(stream).connect(dest);
-            peers.forEach(p => {
-                if (p.stream?.getAudioTracks().length > 0) {
-                    try { audioCtx.createMediaStreamSource(p.stream).connect(dest); } catch (e) { }
-                }
-            });
-            const videoTrack = stream.getVideoTracks()[0];
-            const combined = new MediaStream([...(videoTrack ? [videoTrack] : []), ...dest.stream.getAudioTracks()]);
-            const recorder = new MediaRecorder(combined, { mimeType });
-            recorder.ondataavailable = e => { if (e.data?.size > 0) recordedChunksRef.current.push(e.data); };
-            recorder.onstop = () => { addEvent("SUCCESS", "Recording finalized."); audioCtx.close(); };
-            recorder.start(1000);
-            mediaRecorderRef.current = recorder;
-            setIsRecording(true);
-            addEvent("PROCESS", "Multi-party recording initiated...");
-            showToast("Recording started.", "info");
+            startRecording();
         } else {
             if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
+            mediaRecorderRef.current = null;
             setIsRecording(false);
+            broadcastStatus({ isRecording: false });
         }
     };
 
@@ -545,8 +671,10 @@ const MeetingRoom = () => {
         if (!signer || !isHost) return;
         if (isRecording) {
             if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
+            mediaRecorderRef.current = null;
             setIsRecording(false);
-            await new Promise(r => setTimeout(r, 500));
+            broadcastStatus({ isRecording: false });
+            await new Promise(r => setTimeout(r, 800)); // Wait for chunks
         }
         setFinalizing(true);
         try {
@@ -554,25 +682,35 @@ const MeetingRoom = () => {
             const msg = getSessionSignatureMessage(roomId);
             const signature = await signer.signMessage(msg);
             addEvent("PROCESS", "Encrypting with AES-GCM-256...");
+
             let blobToEncrypt;
             if (recordedChunksRef.current.length > 0) {
+                // Combine and optimize recording blob
                 blobToEncrypt = new Blob(recordedChunksRef.current, { type: 'video/webm' });
             } else {
                 blobToEncrypt = new Blob([JSON.stringify({
                     title: meetingTitle, roomId, sessionCode: huddleId,
-                    timestamp: Date.now(), protocol: "SYNOX v1 (Native WebRTC)"
+                    timestamp: Date.now(), protocol: "SYNOX Grid-Rec v1.1"
                 })], { type: 'application/json' });
             }
+
             const { encrypted } = await encryptFile(new Uint8Array(await blobToEncrypt.arrayBuffer()), signature);
             addEvent("PROCESS", "Uploading to IPFS...");
             const _cid = await uploadToIPFS(encrypted);
             setCid(_cid);
+
             addEvent("BLOCKCHAIN", "Committing proof to Ethereum...");
             const contract = new ethers.Contract(SYNOX_ADDRESS, SYNOX_ABI, signer);
             const tx = await contract.finalizeMeeting(roomId, _cid);
             addEvent("BLOCKCHAIN", `TX Mining: ${tx.hash.slice(0, 10)}...`);
             setFinalTxHash(tx.hash);
             await tx.wait();
+
+            // Notify all peers to end their session
+            if (socketRef.current) {
+                socketRef.current.emit('end-meeting', { roomId: huddleId });
+            }
+
             addEvent("SUCCESS", "Session SEALED. NFTs distributed.");
             setShowSuccessModal(true);
         } catch (e) {
