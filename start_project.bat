@@ -17,3 +17,22 @@ echo 2. Check the "SYNOX Frontend" window for the localhost URL
 echo.
 echo You can close this window now.
 pause
+
+
+
+
+Gemini 3 Pro (High)
+
+Model
+
+
+
+
+
+
+
+
+You can upgrade to a Google AI plan to receive higher rate limits.
+View plans
+
+

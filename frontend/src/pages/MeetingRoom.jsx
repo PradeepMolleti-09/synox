@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useWallet } from '../hooks/useWallet';
 import { ethers } from 'ethers';
@@ -16,26 +16,35 @@ import process from 'process';
 
 window.process = process;
 
-// Huddle components removed
+// Use env var for signaling server URL (falls back to localhost for dev)
+const SIGNALING_SERVER = import.meta.env.VITE_SIGNALING_URL || 'http://localhost:5000';
 
+// ─── Remote Video Component ───────────────────────────────────────────────────
 const RemoteVideo = ({ stream, peerId, isHandRaised, isSpeaking, isVideoOn }) => {
     const ref = useRef();
     const avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${peerId}`;
 
     useEffect(() => {
-        if (ref.current && stream) ref.current.srcObject = stream;
+        if (ref.current && stream) {
+            ref.current.srcObject = stream;
+        }
     }, [stream]);
 
     return (
         <div className={`relative bg-zinc-900 rounded-2xl overflow-hidden aspect-video border transition-all duration-500 ${isSpeaking ? 'border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.3)] scale-[1.02]' : 'border-white/5'}`}>
-            {isVideoOn ? (
-                <video ref={ref} autoPlay className="w-full h-full object-cover" />
-            ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-950 relative">
+            {/* Always render video element; hide it when video is off */}
+            <video
+                ref={ref}
+                autoPlay
+                playsInline
+                className={`w-full h-full object-cover ${!isVideoOn ? 'hidden' : ''}`}
+            />
+            {!isVideoOn && (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-950 absolute inset-0">
                     <img src={avatarUrl} alt="Avatar" className="w-24 h-24 rounded-full border-4 border-white/5 shadow-2xl" />
                     <div className="mt-4 flex items-center gap-2 text-zinc-500 font-mono text-[8px] uppercase tracking-widest">
                         <Volume2 size={12} className={isSpeaking ? 'text-blue-500 animate-pulse' : ''} />
-                        SIGNAL ACTIVE
+                        CAMERA OFF
                     </div>
                 </div>
             )}
@@ -46,13 +55,14 @@ const RemoteVideo = ({ stream, peerId, isHandRaised, isSpeaking, isVideoOn }) =>
                 </div>
             )}
 
-            <div className="absolute bottom-4 left-4 bg-black/60 px-3 py-1.5 rounded-lg text-[10px] font-black tracking-tighter backdrop-blur-md text-white border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="absolute bottom-4 left-4 bg-black/60 px-3 py-1.5 rounded-lg text-[10px] font-black tracking-tighter backdrop-blur-md text-white border border-white/10">
                 PEER: {peerId.slice(0, 8)}
             </div>
         </div>
     );
 };
 
+// ─── Main Component ───────────────────────────────────────────────────────────
 const MeetingRoom = () => {
     const { roomId } = useParams();
     const { provider, signer, account } = useWallet();
@@ -64,7 +74,6 @@ const MeetingRoom = () => {
     const [isHost, setIsHost] = useState(false);
     const [finalizing, setFinalizing] = useState(false);
     const [showSidebar, setShowSidebar] = useState(true);
-    const [activeTab, setActiveTab] = useState('events');
     const [events, setEvents] = useState([]);
     const [finalTxHash, setFinalTxHash] = useState(null);
     const [isRecording, setIsRecording] = useState(false);
@@ -75,29 +84,35 @@ const MeetingRoom = () => {
     const [lobbyLoading, setLobbyLoading] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
 
-    // Media State for P2P
+    // Media State
     const [isVideoOn, setIsVideoOn] = useState(true);
     const [isAudioOn, setIsAudioOn] = useState(true);
     const [localStream, setLocalStream] = useState(null);
-    const [peers, setPeers] = useState([]);
+    const [peers, setPeers] = useState([]); // [{ peerID, peer, stream }]
 
-    // Hand Raise & Audio State
+    // Hand Raise & Speaking State
     const [raisedHands, setRaisedHands] = useState({});
-    const [remoteStatus, setRemoteStatus] = useState({}); // { peerId: { isVideoOn, isAudioOn, isSpeaking } }
+    const [remoteStatus, setRemoteStatus] = useState({});
     const [isSpeaking, setIsLocalSpeaking] = useState(false);
 
-    const socketRef = useRef();
+    // Refs
+    const socketRef = useRef(null);
     const localVideoRef = useRef(null);
+    const localStreamRef = useRef(null); // Always up-to-date stream ref
     const audioContextRef = useRef(null);
-    const peersRef = useRef([]);
+    const peersRef = useRef([]); // [{ peerID, peer }]
     const mediaRecorderRef = useRef(null);
     const recordedChunksRef = useRef([]);
     const { showToast } = useToast();
 
-    // Initialize Meeting and Contract Events
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    const addEvent = useCallback((type, msg) => {
+        setEvents(prev => [{ id: Date.now() + Math.random(), type, msg, time: new Date().toLocaleTimeString() }, ...prev]);
+    }, []);
+
+    // ── Contract Init ─────────────────────────────────────────────────────────
     useEffect(() => {
         if (!provider || !roomId || !account) return;
-
         const contract = new ethers.Contract(SYNOX_ADDRESS, SYNOX_ABI, provider);
 
         const fetchMeeting = async () => {
@@ -106,32 +121,25 @@ const MeetingRoom = () => {
                 setHuddleId(m.huddleId);
                 setMeetingTitle(m.title);
                 setIsHost(m.host.toLowerCase() === account?.toLowerCase());
-
-                // Generate random 3-digit display ID (demo purposes)
                 const randId = Math.floor(100 + Math.random() * 900);
                 setDisplayId(randId.toString());
-                if (m.recordingCID && m.recordingCID !== "") {
-                    setCid(m.recordingCID);
-                }
+                if (m.recordingCID && m.recordingCID !== "") setCid(m.recordingCID);
             } catch (e) {
                 console.warn("Meeting fetch failed", e);
             }
         };
-
         fetchMeeting();
 
-        // Listen for live events
         const onJoined = (mid, user) => {
             if (Number(mid) === Number(roomId)) {
                 addEvent("USER JOINED", `${user.slice(0, 6)}... joined the room.`);
             }
         };
-
         contract.on("UserJoined", onJoined);
         return () => contract.off("UserJoined", onJoined);
     }, [provider, roomId, account]);
 
-    // Body Scroll Lock for Mobile Sidebar
+    // ── Body Scroll Lock ──────────────────────────────────────────────────────
     useEffect(() => {
         if (showSidebar && window.innerWidth < 1024) {
             document.body.style.overflow = 'hidden';
@@ -141,21 +149,51 @@ const MeetingRoom = () => {
         return () => { document.body.style.overflow = 'unset'; };
     }, [showSidebar]);
 
-    const addEvent = (type, msg) => {
-        setEvents(prev => [{ id: Date.now(), type, msg, time: new Date().toLocaleTimeString() }, ...prev]);
-    };
+    // ── Media Init (runs once, before joining) ────────────────────────────────
+    useEffect(() => {
+        const initMedia = async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                stream.getVideoTracks()[0].enabled = isVideoOn;
+                stream.getAudioTracks()[0].enabled = isAudioOn;
+                localStreamRef.current = stream;
+                setLocalStream(stream);
+                if (localVideoRef.current) {
+                    localVideoRef.current.srcObject = stream;
+                }
+            } catch (e) {
+                console.warn("Media init failed:", e);
+                showToast("Media Error: Check camera/mic permissions.", "error");
+            }
+        };
+        initMedia();
+
+        return () => {
+            // Cleanup stream on unmount
+            if (localStreamRef.current) {
+                localStreamRef.current.getTracks().forEach(t => t.stop());
+            }
+        };
+    }, []); // Only run once
+
+    // ── Attach stream to local video element ──────────────────────────────────
+    useEffect(() => {
+        if (localVideoRef.current && localStream) {
+            localVideoRef.current.srcObject = localStream;
+        }
+    }, [localStream]);
+
+    // ── Join Session ──────────────────────────────────────────────────────────
     const handleJoinSession = async () => {
         if (!signer || !provider) return;
         setLobbyLoading(true);
         try {
             const contract = new ethers.Contract(SYNOX_ADDRESS, SYNOX_ABI, signer);
-
             const isPart = await contract.isParticipant(roomId, account);
             if (!isPart) {
                 const tx = await contract.joinMeeting(roomId);
                 await tx.wait();
             }
-
             setHasJoined(true);
             addEvent("NETWORK", "Secure P2P tunnel established via WebRTC.");
         } catch (e) {
@@ -165,108 +203,174 @@ const MeetingRoom = () => {
         setLobbyLoading(false);
     };
 
-    // WebRTC P2P Multi-Peer Logic
+    // ── Peer Creation Helpers ─────────────────────────────────────────────────
+    const createPeer = useCallback((userToSignal, callerID) => {
+        const stream = localStreamRef.current;
+        const peer = new Peer({
+            initiator: true,
+            trickle: false,
+            stream: stream || undefined,
+        });
+
+        peer.on("signal", signal => {
+            socketRef.current?.emit("offer", { target: userToSignal, callerID, signal });
+        });
+
+        peer.on("stream", remoteStream => {
+            setPeers(prev => prev.map(p =>
+                p.peerID === userToSignal ? { ...p, stream: remoteStream } : p
+            ));
+        });
+
+        peer.on("data", data => {
+            try {
+                const parsed = JSON.parse(data);
+                handleIncomingData(userToSignal, parsed);
+            } catch (e) { }
+        });
+
+        peer.on("error", err => console.warn("Peer error (initiator):", err));
+
+        return peer;
+    }, []);
+
+    const addPeer = useCallback((incomingSignal, callerID) => {
+        const stream = localStreamRef.current;
+        const peer = new Peer({
+            initiator: false,
+            trickle: false,
+            stream: stream || undefined,
+        });
+
+        peer.on("signal", signal => {
+            socketRef.current?.emit("answer", { signal, target: incomingSignal, id: socketRef.current.id });
+        });
+
+        peer.on("stream", remoteStream => {
+            setPeers(prev => prev.map(p =>
+                p.peerID === incomingSignal ? { ...p, stream: remoteStream } : p
+            ));
+        });
+
+        peer.on("data", data => {
+            try {
+                const parsed = JSON.parse(data);
+                handleIncomingData(incomingSignal, parsed);
+            } catch (e) { }
+        });
+
+        peer.on("error", err => console.warn("Peer error (receiver):", err));
+
+        // Signal the peer with the incoming offer
+        peer.signal(incomingSignal);
+
+        return peer;
+    }, []);
+
+    // ── WebRTC + Socket Setup (after joining) ─────────────────────────────────
     useEffect(() => {
         if (!hasJoined || !huddleId) return;
 
-        socketRef.current = io("http://localhost:5000"); // Local Signaling Node
+        const socket = io(SIGNALING_SERVER, { transports: ['websocket', 'polling'] });
+        socketRef.current = socket;
 
-        socketRef.current.emit("join-room", huddleId);
+        socket.emit("join-room", huddleId);
+        addEvent("NETWORK", `Connected to signaling server. Room: ${huddleId.slice(0, 12)}...`);
 
-        socketRef.current.on("other-user", (userId) => {
-            const peer = createPeer(userId, socketRef.current.id, localStream);
-            peersRef.current.push({
-                peerID: userId,
-                peer,
+        // New joiner receives list of ALL existing users
+        socket.on("all-users", (users) => {
+            addEvent("NETWORK", `${users.length} peer(s) already in room. Connecting...`);
+            const newPeers = users.map(userID => {
+                const peer = createPeer(userID, socket.id);
+                peersRef.current.push({ peerID: userID, peer });
+                return { peerID: userID, peer, stream: null };
             });
-            setPeers(prev => [...prev, { peerID: userId, peer }]);
+            setPeers(newPeers);
         });
 
-        socketRef.current.on("user-joined", (userId) => {
-            const peer = addPeer(userId, socketRef.current.id, localStream);
-            peersRef.current.push({
-                peerID: userId,
-                peer,
+        // Existing user notified that someone new joined
+        socket.on("user-joined", (userID) => {
+            addEvent("NETWORK", `New peer joined: ${userID.slice(0, 8)}...`);
+            // Don't create duplicate
+            if (peersRef.current.find(p => p.peerID === userID)) return;
+            // The new user will send us an offer; we wait for it via "offer" event
+            // But we need to register the peer entry so we can signal it
+        });
+
+        // Receive an offer (we are the non-initiator)
+        socket.on("offer", (payload) => {
+            // Check if we already have a peer for this caller
+            const existing = peersRef.current.find(p => p.peerID === payload.callerID);
+            if (existing) {
+                existing.peer.signal(payload.signal);
+                return;
+            }
+
+            // Create a new non-initiator peer and signal it with the offer
+            const peer = new Peer({
+                initiator: false,
+                trickle: false,
+                stream: localStreamRef.current || undefined,
             });
-            setPeers(prev => [...prev, { peerID: userId, peer }]);
+
+            peer.on("signal", signal => {
+                socket.emit("answer", { signal, target: payload.callerID, id: socket.id });
+            });
+
+            peer.on("stream", remoteStream => {
+                setPeers(prev => prev.map(p =>
+                    p.peerID === payload.callerID ? { ...p, stream: remoteStream } : p
+                ));
+            });
+
+            peer.on("data", data => {
+                try {
+                    const parsed = JSON.parse(data);
+                    handleIncomingData(payload.callerID, parsed);
+                } catch (e) { }
+            });
+
+            peer.on("error", err => console.warn("Peer error:", err));
+
+            // Signal with the incoming offer
+            peer.signal(payload.signal);
+
+            peersRef.current.push({ peerID: payload.callerID, peer });
+            setPeers(prev => {
+                if (prev.find(p => p.peerID === payload.callerID)) return prev;
+                return [...prev, { peerID: payload.callerID, peer, stream: null }];
+            });
         });
 
-        socketRef.current.on("offer", (payload) => {
-            const item = peersRef.current.find(p => p.peerID === payload.callerID);
-            if (item) item.peer.signal(payload.signal);
-        });
-
-        socketRef.current.on("answer", (payload) => {
+        // Receive an answer (we are the initiator)
+        socket.on("answer", (payload) => {
             const item = peersRef.current.find(p => p.peerID === payload.id);
             if (item) item.peer.signal(payload.signal);
         });
 
+        // User left
+        socket.on("user-left", (userID) => {
+            addEvent("NETWORK", `Peer disconnected: ${userID.slice(0, 8)}...`);
+            const peerObj = peersRef.current.find(p => p.peerID === userID);
+            if (peerObj) peerObj.peer.destroy();
+            peersRef.current = peersRef.current.filter(p => p.peerID !== userID);
+            setPeers(prev => prev.filter(p => p.peerID !== userID));
+            setRemoteStatus(prev => {
+                const next = { ...prev };
+                delete next[userID];
+                return next;
+            });
+        });
+
         return () => {
-            if (socketRef.current) socketRef.current.disconnect();
+            socket.disconnect();
             peersRef.current.forEach(p => p.peer.destroy());
+            peersRef.current = [];
+            setPeers([]);
         };
     }, [hasJoined, huddleId]);
 
-    function createPeer(userToSignal, callerID, stream) {
-        const peer = new Peer({
-            initiator: true,
-            trickle: false,
-            stream,
-        });
-
-        peer.on("signal", signal => {
-            socketRef.current.emit("offer", { target: userToSignal, callerID, signal });
-        });
-
-        peer.on("stream", stream => {
-            setPeers(prevPeers => {
-                return prevPeers.map(p => {
-                    if (p.peerID === userToSignal) {
-                        return { ...p, stream };
-                    }
-                    return p;
-                });
-            });
-        });
-
-        peer.on("data", data => {
-            const parsed = JSON.parse(data);
-            handleIncomingData(userToSignal, parsed);
-        });
-
-        return peer;
-    }
-
-    function addPeer(incomingSignal, callerID, stream) {
-        const peer = new Peer({
-            initiator: false,
-            trickle: false,
-            stream,
-        });
-
-        peer.on("signal", signal => {
-            socketRef.current.emit("answer", { signal, target: incomingSignal, id: socketRef.current.id });
-        });
-
-        peer.on("stream", stream => {
-            setPeers(prevPeers => {
-                return prevPeers.map(p => {
-                    if (p.peerID === incomingSignal) {
-                        return { ...p, stream };
-                    }
-                    return p;
-                });
-            });
-        });
-
-        peer.on("data", data => {
-            const parsed = JSON.parse(data);
-            handleIncomingData(incomingSignal, parsed);
-        });
-
-        return peer;
-    }
-
+    // ── Incoming Data Handler ─────────────────────────────────────────────────
     const handleIncomingData = (sender, data) => {
         if (data.type === 'hand') {
             setRaisedHands(prev => ({ ...prev, [sender]: data.value }));
@@ -279,43 +383,47 @@ const MeetingRoom = () => {
         }
     };
 
-    const broadcastStatus = (payload) => {
-        const data = JSON.stringify({ type: 'status', payload });
-        peersRef.current.forEach(p => p.peer.send(data));
+    const broadcastData = (payload) => {
+        const data = JSON.stringify(payload);
+        peersRef.current.forEach(p => {
+            try { p.peer.send(data); } catch (e) { }
+        });
     };
 
+    const broadcastStatus = (payload) => {
+        broadcastData({ type: 'status', payload });
+    };
 
+    // ── Toggle Hand ───────────────────────────────────────────────────────────
     const toggleHand = () => {
         const newState = !raisedHands['me'];
         setRaisedHands(prev => ({ ...prev, me: newState }));
-        const payload = { type: 'hand', value: newState };
-        peersRef.current.forEach(p => p.peer.send(JSON.stringify(payload)));
+        broadcastData({ type: 'hand', value: newState });
         addEvent("PROCESS", newState ? "Hand raised on protocol node." : "Hand lowered.");
     };
 
-    // Speaking Indicator Logic
+    // ── Speaking Indicator ────────────────────────────────────────────────────
     useEffect(() => {
         if (!localStream || !isAudioOn) {
             setIsLocalSpeaking(false);
             return;
         }
-
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const source = audioContext.createMediaStreamSource(localStream);
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 256;
         source.connect(analyser);
-
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
+        let lastSpeaking = false;
 
-        let interval = setInterval(() => {
+        const interval = setInterval(() => {
             analyser.getByteFrequencyData(dataArray);
             const sum = dataArray.reduce((a, b) => a + b, 0);
             const average = sum / bufferLength;
-            const speaking = average > 15; // Noise threshold
-
-            if (speaking !== isSpeaking) {
+            const speaking = average > 15;
+            if (speaking !== lastSpeaking) {
+                lastSpeaking = speaking;
                 setIsLocalSpeaking(speaking);
                 broadcastStatus({ isSpeaking: speaking });
             }
@@ -328,101 +436,71 @@ const MeetingRoom = () => {
         };
     }, [localStream, isAudioOn]);
 
-    // Persistent media init
-    useEffect(() => {
-        const initMedia = async () => {
-            try {
-                if (localStream) {
-                    // Don't restart if already running
-                    return;
-                }
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: true,
-                    audio: true
-                });
-                setLocalStream(stream);
+    // ── Toggle Video ──────────────────────────────────────────────────────────
+    const toggleVideo = () => {
+        const stream = localStreamRef.current;
+        if (!stream) return;
+        const videoTrack = stream.getVideoTracks()[0];
+        if (!videoTrack) return;
 
-                // Initially set based on states
-                stream.getVideoTracks()[0].enabled = isVideoOn;
-                stream.getAudioTracks()[0].enabled = isAudioOn;
+        const newState = !isVideoOn;
+        videoTrack.enabled = newState;
+        setIsVideoOn(newState);
+        broadcastStatus({ isVideoOn: newState });
 
-                if (localVideoRef.current) {
-                    localVideoRef.current.srcObject = stream;
-                }
-            } catch (e) {
-                console.warn("Media init failed:", e);
-                showToast("Media Error: Check camera permissions.", "error");
-            }
-        };
-        initMedia();
-    }, [hasJoined]); // Re-run if joining, but keep stream
-
-    useEffect(() => {
-        if (localVideoRef.current && localStream) {
-            localVideoRef.current.srcObject = localStream;
+        // Ensure local video element is still attached
+        if (localVideoRef.current && localVideoRef.current.srcObject !== stream) {
+            localVideoRef.current.srcObject = stream;
         }
-    }, [localStream, hasJoined]);
+    };
 
+    // ── Toggle Audio ──────────────────────────────────────────────────────────
+    const toggleAudio = () => {
+        const stream = localStreamRef.current;
+        if (!stream) return;
+        const audioTrack = stream.getAudioTracks()[0];
+        if (!audioTrack) return;
+
+        const newState = !isAudioOn;
+        audioTrack.enabled = newState;
+        setIsAudioOn(newState);
+        broadcastStatus({ isAudioOn: newState });
+    };
+
+    // ── Recording ─────────────────────────────────────────────────────────────
     const toggleRecording = () => {
         if (!isHost) return;
         if (!isRecording) {
-            if (!localStream) {
-                showToast("No media stream found to record.", "error");
-                return;
-            }
+            const stream = localStreamRef.current;
+            if (!stream) { showToast("No media stream found to record.", "error"); return; }
             recordedChunksRef.current = [];
 
-            // Auto-detect supported types
             const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
                 .find(type => MediaRecorder.isTypeSupported(type));
+            if (!mimeType) { showToast("No supported video recording format found.", "error"); return; }
 
-            if (!mimeType) {
-                showToast("No supported video recording format found.", "error");
-                return;
-            }
-
-            // Create a Combined Stream for Recording (Local Video + All Participant Audio)
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const destination = audioCtx.createMediaStreamDestination();
 
-            // 1. Add Local Audio
-            if (localStream.getAudioTracks().length > 0) {
-                const localSource = audioCtx.createMediaStreamSource(localStream);
-                localSource.connect(destination);
+            if (stream.getAudioTracks().length > 0) {
+                audioCtx.createMediaStreamSource(stream).connect(destination);
             }
-
-            // 2. Add Remote Audio from all peers
             peers.forEach(p => {
-                if (p.stream && p.stream.getAudioTracks().length > 0) {
-                    try {
-                        const remoteSource = audioCtx.createMediaStreamSource(p.stream);
-                        remoteSource.connect(destination);
-                    } catch (e) {
-                        console.warn("Could not mix peer audio:", p.peerID, e);
-                    }
+                if (p.stream?.getAudioTracks().length > 0) {
+                    try { audioCtx.createMediaStreamSource(p.stream).connect(destination); } catch (e) { }
                 }
             });
 
-            // 3. Composite Local Video + Mixed Audio
+            const videoTrack = stream.getVideoTracks()[0];
             const combinedStream = new MediaStream([
-                localStream.getVideoTracks()[0],
+                ...(videoTrack ? [videoTrack] : []),
                 ...destination.stream.getAudioTracks()
             ]);
 
             const recorder = new MediaRecorder(combinedStream, { mimeType });
-
-            recorder.ondataavailable = (e) => {
-                if (e.data && e.data.size > 0) {
-                    recordedChunksRef.current.push(e.data);
-                }
-            };
-
-            recorder.onstop = () => {
-                addEvent("SUCCESS", "Video proof segments finalized with multi-user audio.");
-                audioCtx.close();
-            };
-
-            recorder.start(1000); // Collect chunks every second for safety
+            recorder.ondataavailable = (e) => { if (e.data?.size > 0) recordedChunksRef.current.push(e.data); };
+            recorder.onstop = () => { addEvent("SUCCESS", "Video proof segments finalized."); audioCtx.close(); };
+            recorder.start(1000);
             mediaRecorderRef.current = recorder;
             setIsRecording(true);
             setRecStartTime(Date.now());
@@ -435,17 +513,13 @@ const MeetingRoom = () => {
         }
     };
 
+    // ── Finalize Meeting ──────────────────────────────────────────────────────
     const finalizeMeeting = async () => {
         if (!signer || !isHost) return;
-
-        // Ensure recording is stopped if active
         if (isRecording) {
-            if (mediaRecorderRef.current) {
-                mediaRecorderRef.current.stop();
-            }
+            if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
             setIsRecording(false);
             addEvent("PROCESS", "Finalizing active recording before seal...");
-            // Small delay to ensure ondataavailable fires
             await new Promise(r => setTimeout(r, 500));
         }
 
@@ -454,66 +528,55 @@ const MeetingRoom = () => {
             addEvent("PROCESS", "Requesting cryptographic signature for encryption key...");
             const msg = getSessionSignatureMessage(roomId);
             const signature = await signer.signMessage(msg);
-
             addEvent("PROCESS", "Encrypting protocol metadata & video stream with AES-GCM-256...");
 
-            // Prepare the proof blob (Metadata & Session Info)
             let blobToEncrypt;
             if (recordedChunksRef.current.length > 0) {
                 blobToEncrypt = new Blob(recordedChunksRef.current, { type: 'video/webm' });
             } else {
                 const proofData = {
-                    title: meetingTitle,
-                    roomId: roomId,
-                    sessionCode: huddleId,
+                    title: meetingTitle, roomId, sessionCode: huddleId,
                     participants: events.filter(e => e.type === 'LEDGER').map(e => e.msg),
-                    timestamp: Date.now(),
-                    protocol: "SYNOX v1 (P2P Mesh)"
+                    timestamp: Date.now(), protocol: "SYNOX v1 (P2P Mesh)"
                 };
                 blobToEncrypt = new Blob([JSON.stringify(proofData)], { type: 'application/json' });
             }
 
             const arrayBuffer = await blobToEncrypt.arrayBuffer();
             const { encrypted } = await encryptFile(new Uint8Array(arrayBuffer), signature);
-
             addEvent("PROCESS", "Uploading encrypted payload to IPFS (via Pinata)...");
             const _cid = await uploadToIPFS(encrypted);
-            console.log("🔍 Final CID Generated:", _cid);
             setCid(_cid);
 
             addEvent("BLOCKCHAIN", "Committing cryptographic proof to Ethereum ledger...");
             const contract = new ethers.Contract(SYNOX_ADDRESS, SYNOX_ABI, signer);
             const tx = await contract.finalizeMeeting(roomId, _cid);
-
             addEvent("BLOCKCHAIN", `TX Mining: ${tx.hash.slice(0, 10)}...`);
             setFinalTxHash(tx.hash);
             await tx.wait();
-
             addEvent("SUCCESS", "Session SEALED. NFTs distributed to participants.");
             setShowSuccessModal(true);
         } catch (e) {
-            console.error("❌ Protocol finalization error:", e);
+            console.error("Protocol finalization error:", e);
             addEvent("ERROR", e.message);
             showToast("Protocol Violation: " + e.message, "error");
         }
         setFinalizing(false);
     };
 
+    // ── Fetch On-Chain History ────────────────────────────────────────────────
     const fetchHistory = async () => {
         if (!provider || !roomId) return;
         try {
             const contract = new ethers.Contract(SYNOX_ADDRESS, SYNOX_ABI, provider);
-            // Fetch past UserJoined events for this specific meeting
             const filter = contract.filters.UserJoined(roomId);
             const logs = await contract.queryFilter(filter);
-
             const history = logs.map(log => ({
                 id: log.blockNumber + log.transactionHash,
                 type: "LEDGER",
                 msg: `Verified Participant: ${log.args[1].slice(0, 6)}...${log.args[1].slice(-4)} joined the session.`,
                 time: "ON-CHAIN RECORD"
             }));
-
             setEvents(prev => [...history, ...prev]);
         } catch (e) {
             console.warn("Failed to fetch event history:", e);
@@ -521,11 +584,12 @@ const MeetingRoom = () => {
     };
 
     useEffect(() => {
-        if (hasJoined) {
-            fetchHistory();
-        }
+        if (hasJoined) fetchHistory();
     }, [hasJoined, roomId]);
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // LOBBY VIEW
+    // ─────────────────────────────────────────────────────────────────────────
     if (!hasJoined) {
         return (
             <div className="min-h-screen bg-black flex items-center justify-center p-6 pt-24">
@@ -537,6 +601,7 @@ const MeetingRoom = () => {
                                 ref={localVideoRef}
                                 autoPlay
                                 muted
+                                playsInline
                                 className={`w-full h-full object-cover transform scale-x-[-1] ${!isVideoOn ? 'hidden' : ''}`}
                             />
                             {!isVideoOn && (
@@ -551,19 +616,13 @@ const MeetingRoom = () => {
                             )}
                             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4">
                                 <button
-                                    onClick={() => {
-                                        setIsAudioOn(!isAudioOn);
-                                        if (localStream) localStream.getAudioTracks()[0].enabled = !isAudioOn;
-                                    }}
+                                    onClick={toggleAudio}
                                     className={`p-4 rounded-2xl transition-all ${isAudioOn ? 'bg-white/10 text-white border border-white/20' : 'bg-red-500/20 text-red-500 border border-red-500/40'}`}
                                 >
                                     {isAudioOn ? <Mic size={24} /> : <MicOff size={24} />}
                                 </button>
                                 <button
-                                    onClick={() => {
-                                        setIsVideoOn(!isVideoOn);
-                                        if (localStream) localStream.getVideoTracks()[0].enabled = !isVideoOn;
-                                    }}
+                                    onClick={toggleVideo}
                                     className={`p-4 rounded-2xl transition-all ${isVideoOn ? 'bg-white/10 text-white border border-white/20' : 'bg-red-500/20 text-red-500 border border-red-500/40'}`}
                                 >
                                     {isVideoOn ? <Video size={24} /> : <VideoOff size={24} />}
@@ -610,6 +669,9 @@ const MeetingRoom = () => {
         );
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // MEETING ROOM VIEW
+    // ─────────────────────────────────────────────────────────────────────────
     return (
         <div className="h-screen bg-black text-white flex flex-col font-sans overflow-hidden pt-20">
             {/* Header */}
@@ -629,6 +691,9 @@ const MeetingRoom = () => {
                             <span className="flex items-center gap-1 uppercase bg-white/5 px-2 py-0.5 rounded"><Hash size={10} className="text-white/20" /> CODE: {displayId || "..."}</span>
                             <span className="flex items-center gap-1 uppercase bg-blue-500/10 px-2 py-0.5 rounded text-blue-400"><Hash size={10} className="text-blue-500/30" /> INDEX: {roomId}</span>
                             <span className="flex items-center gap-1 uppercase bg-white/5 px-2 py-0.5 rounded"><Globe size={10} className="text-white/20" /> CID: {cid.slice(0, 10)}...</span>
+                            <span className="flex items-center gap-1 uppercase bg-green-500/10 px-2 py-0.5 rounded text-green-400">
+                                <Users size={10} /> {peers.length + 1} ONLINE
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -649,11 +714,17 @@ const MeetingRoom = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-7xl mx-auto">
                         {/* Local Peer */}
                         <div className={`relative bg-zinc-900 rounded-3xl overflow-hidden aspect-video border-2 shadow-[0_0_50px_rgba(255,255,255,0.05)] transition-all duration-500 ${isSpeaking ? 'border-blue-500 shadow-[0_0_40px_rgba(59,130,246,0.4)]' : 'border-white/20'}`}>
-                            {isVideoOn ? (
-                                <video ref={localVideoRef} autoPlay muted className="w-full h-full object-cover transform scale-x-[-1]" />
-                            ) : (
-                                <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-950">
+                            <video
+                                ref={localVideoRef}
+                                autoPlay
+                                muted
+                                playsInline
+                                className={`w-full h-full object-cover transform scale-x-[-1] ${!isVideoOn ? 'hidden' : ''}`}
+                            />
+                            {!isVideoOn && (
+                                <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-zinc-950">
                                     <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${account}`} alt="Me" className="w-24 h-24 rounded-full border-4 border-white/5 shadow-2xl" />
+                                    <p className="mt-3 text-zinc-600 font-mono text-[9px] uppercase tracking-widest">Camera Off</p>
                                 </div>
                             )}
 
@@ -673,13 +744,12 @@ const MeetingRoom = () => {
                             </div>
                         </div>
 
-                        {/* Remote Peers - Ordered by Active Participant Status */}
+                        {/* Remote Peers */}
                         {peers
                             .map(p => ({ ...p, status: remoteStatus[p.peerID] || {} }))
                             .sort((a, b) => {
                                 if (a.status.isSpeaking && !b.status.isSpeaking) return -1;
                                 if (!a.status.isSpeaking && b.status.isSpeaking) return 1;
-                                if (a.status.isVideoOn && !b.status.isVideoOn) return -1;
                                 return 0;
                             })
                             .map((peer) => (
@@ -703,13 +773,15 @@ const MeetingRoom = () => {
                     </div>
                 </main>
 
-                {/* Sidebar: Event Panel & Voting */}
+                {/* Sidebar Backdrop (mobile) */}
                 {showSidebar && (
                     <div
                         className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-30"
                         onClick={() => setShowSidebar(false)}
                     />
                 )}
+
+                {/* Sidebar */}
                 <aside className={`fixed lg:relative inset-y-0 right-0 w-80 h-full border-l border-white/5 glass transition-all duration-500 transform z-40 ${showSidebar ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'}`}>
                     <div className="flex p-4 border-b border-white/5 gap-2">
                         <div className="flex-1 py-2 px-4 rounded-lg text-[10px] font-black tracking-widest bg-white text-black text-center">
@@ -744,21 +816,18 @@ const MeetingRoom = () => {
                 </aside>
             </div>
 
+            {/* Footer Controls */}
             <footer className="h-24 md:h-20 flex items-center justify-between glass border-t border-white/5 z-20 px-8 py-2">
                 <div className="flex items-center gap-4">
+                    {/* Mic Toggle */}
                     <button
-                        onClick={() => {
-                            const audioTrack = localStream.getAudioTracks()[0];
-                            if (audioTrack) {
-                                audioTrack.enabled = !audioTrack.enabled;
-                                setIsAudioOn(audioTrack.enabled);
-                                broadcastStatus({ isAudioOn: audioTrack.enabled });
-                            }
-                        }}
+                        onClick={toggleAudio}
                         className={`p-4 rounded-2xl transition-all ${isAudioOn ? 'bg-zinc-900 border border-white/10' : 'bg-red-500 text-white border border-red-500'}`}
                     >
                         {isAudioOn ? <Mic size={20} /> : <MicOff size={20} />}
                     </button>
+
+                    {/* Hand Raise */}
                     <button
                         onClick={toggleHand}
                         className={`p-4 rounded-2xl transition-all ${raisedHands['me'] ? 'bg-blue-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.5)]' : 'bg-zinc-900 border border-white/10 text-gray-400'}`}
@@ -766,25 +835,19 @@ const MeetingRoom = () => {
                         <Hand size={20} />
                     </button>
 
+                    {/* Camera Toggle */}
                     <button
-                        onClick={() => {
-                            if (localStream) {
-                                const videoTrack = localStream.getVideoTracks()[0];
-                                if (videoTrack) {
-                                    videoTrack.enabled = !videoTrack.enabled;
-                                    setIsVideoOn(videoTrack.enabled);
-                                    broadcastStatus({ isVideoOn: videoTrack.enabled });
-                                }
-                            }
-                        }}
+                        onClick={toggleVideo}
                         className={`p-4 rounded-2xl transition-all ${isVideoOn ? 'bg-zinc-900 border border-white/10' : 'bg-red-500 text-white border border-red-500'}`}
                     >
                         {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
                     </button>
 
+                    {/* Leave */}
                     <button
                         onClick={() => {
                             if (socketRef.current) socketRef.current.disconnect();
+                            if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop());
                             navigate('/dashboard');
                         }}
                         className="ml-4 px-8 py-4 rounded-2xl bg-red-600 text-white font-black text-[10px] tracking-widest hover:bg-red-700 transition-all flex items-center gap-2 shadow-xl shadow-red-500/20"
@@ -799,12 +862,15 @@ const MeetingRoom = () => {
                 </div>
 
                 <div className="flex items-center gap-4">
+                    {/* Record */}
                     <button
                         onClick={toggleRecording}
                         className={`p-3.5 rounded-xl transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-white/5 text-gray-400 hover:bg-white/10 border border-white/10'}`}
                     >
                         <Activity size={18} />
                     </button>
+
+                    {/* Finalize */}
                     <button
                         onClick={finalizeMeeting}
                         disabled={finalizing || !isHost}
@@ -819,42 +885,28 @@ const MeetingRoom = () => {
             {/* Success Modal */}
             {showSuccessModal && (
                 <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-2xl flex items-center justify-center p-6">
-                    <div className="max-w-md w-full glass p-8 rounded-[2.5rem] border border-white/10 shadow-2xl text-center relative overflow-hidden group">
+                    <div className="max-w-md w-full glass p-8 rounded-[2.5rem] border border-white/10 shadow-2xl text-center relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent"></div>
-
                         <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6 border border-green-500/30">
                             <Trophy className="text-green-500" size={32} />
                         </div>
-
                         <h2 className="text-3xl font-black tracking-tighter uppercase mb-4">Protocol Finalized</h2>
                         <p className="text-zinc-500 text-sm font-light leading-relaxed mb-8 px-4">
                             The meeting has been cryptographically sealed and your attendance reputation has been registered on the ethereum ledger.
                         </p>
-
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-8 text-left">
                             <span className="text-[8px] font-black text-blue-500 tracking-[0.2em] uppercase block mb-1">Archived Hash (CID)</span>
                             <p className="text-[10px] font-mono text-zinc-400 break-all">{cid}</p>
                         </div>
-
                         <div className="flex flex-col gap-3">
-                            <button
-                                onClick={() => navigate('/reputation')}
-                                className="w-full bg-white text-black py-4 rounded-2xl font-black tracking-widest text-xs hover:bg-zinc-200 transition-all flex items-center justify-center gap-2"
-                            >
+                            <button onClick={() => navigate('/reputation')} className="w-full bg-white text-black py-4 rounded-2xl font-black tracking-widest text-xs hover:bg-zinc-200 transition-all flex items-center justify-center gap-2">
                                 <Trophy size={16} /> VIEW REPUTATION
                             </button>
-                            <a
-                                href={`https://sepolia.etherscan.io/tx/${finalTxHash}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black tracking-widest text-xs hover:bg-blue-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20"
-                            >
+                            <a href={`https://sepolia.etherscan.io/tx/${finalTxHash}`} target="_blank" rel="noreferrer"
+                                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black tracking-widest text-xs hover:bg-blue-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20">
                                 <ExternalLink size={16} /> VIEW ON ETHERSCAN
                             </a>
-                            <button
-                                onClick={() => navigate('/dashboard')}
-                                className="w-full bg-zinc-900 border border-white/5 text-zinc-500 py-4 rounded-2xl font-black tracking-widest text-xs hover:border-white/10 transition-all"
-                            >
+                            <button onClick={() => navigate('/dashboard')} className="w-full bg-zinc-900 border border-white/5 text-zinc-500 py-4 rounded-2xl font-black tracking-widest text-xs hover:border-white/10 transition-all">
                                 BACK TO DASHBOARD
                             </button>
                         </div>
