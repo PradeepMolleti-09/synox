@@ -35,7 +35,7 @@ const Login = () => {
 
                 <h1 className="text-4xl font-black tracking-tighter uppercase mb-2">Protocol Access</h1>
                 <p className="text-zinc-500 font-light text-sm leading-relaxed mb-10 px-4">
-                    Decrypt your secure workspace. Connect and authorize your identity signature to enter the SYNOX environment.
+                    Decrypt your secure workspace. Connect and authorize your identity signature to enter the SyNox09 environment.
                 </p>
 
                 <div className="space-y-4">
@@ -79,7 +79,7 @@ const Login = () => {
 
             {/* Bottom Branding */}
             <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-3 opacity-20 hover:opacity-100 transition-opacity">
-                <span className="text-[10px] font-black tracking-[0.5em] text-white uppercase">SYNOX CORE</span>
+                <span className="text-[10px] font-black tracking-[0.5em] text-white uppercase">SyNox09 CORE</span>
                 <div className="h-px w-12 bg-white/20"></div>
                 <span className="text-[10px] font-mono text-white/50">V2.4.0-STABLE</span>
             </div>

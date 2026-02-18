@@ -6,7 +6,7 @@ import { SYNOX_ADDRESS, SYNOX_ABI } from '../utils/contract';
 import {
     Mic, MicOff, Video, VideoOff, PhoneOff, Users,
     ShieldCheck, Trophy, Activity, Hand, Volume2,
-    Hash, Globe, X, ExternalLink, Captions, Maximize, Monitor, Circle, StopCircle
+    Hash, Globe, X, ExternalLink, Maximize, Monitor, Circle, StopCircle
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { encryptFile, uploadToIPFS, getSessionSignatureMessage } from '../utils/storage';
@@ -104,11 +104,6 @@ const MeetingRoom = () => {
     const [raisedHands, setRaisedHands] = useState({});
     const [remoteStatus, setRemoteStatus] = useState({});
     const [isSpeaking, setIsLocalSpeaking] = useState(false);
-
-    // AI Captions State
-    const [isCaptioning, setIsCaptioning] = useState(false);
-    const [captions, setCaptions] = useState([]); // { text, sender }
-    const recognitionRef = useRef(null);
 
     // Screen Share State
     const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -544,52 +539,6 @@ const MeetingRoom = () => {
         broadcastStatus({ isAudioOn: newState });
     };
 
-    // ── AI Captions (CC) Logic ────────────────────────────────────────────────
-    useEffect(() => {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) return;
-
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
-
-        recognition.onresult = (event) => {
-            const transcript = Array.from(event.results)
-                .map(result => result[0])
-                .map(result => result.transcript)
-                .join('');
-
-            if (event.results[event.results.length - 1].isFinal) {
-                const newCaption = { id: Date.now(), text: transcript, sender: 'You' };
-                setCaptions(prev => [...prev.slice(-4), newCaption]);
-                broadcastStatus({ caption: transcript });
-            }
-        };
-
-        recognition.onend = () => {
-            if (isCaptioning) recognition.start();
-        };
-
-        recognitionRef.current = recognition;
-
-        return () => {
-            recognition.stop();
-        };
-    }, [isCaptioning, broadcastStatus]);
-
-    const toggleCaptions = () => {
-        const newState = !isCaptioning;
-        setIsCaptioning(newState);
-        if (newState) {
-            recognitionRef.current?.start();
-            showToast("AI Captions Enabled", "info");
-        } else {
-            recognitionRef.current?.stop();
-            showToast("AI Captions Disabled", "info");
-        }
-    };
-
     // ── Screen Sharing Logic ──────────────────────────────────────────────────
     const toggleScreenSharing = async () => {
         try {
@@ -935,7 +884,7 @@ const MeetingRoom = () => {
                         </div>
                         <div className="p-4 border border-white/5 rounded-2xl bg-white/[0.02]">
                             <p className="text-[9px] font-mono text-zinc-600 uppercase tracking-widest leading-relaxed">
-                                SECURE NOTE: BY JOINING, YOU AUTHORIZE THE SYNOX SMART CONTRACT ({SYNOX_ADDRESS.slice(0, 8)}...) TO RECORD YOUR ATTENDANCE.
+                                SECURE NOTE: BY JOINING, YOU AUTHORIZE THE SyNox09 SMART CONTRACT ({SYNOX_ADDRESS.slice(0, 8)}...) TO RECORD YOUR ATTENDANCE.
                             </p>
                         </div>
                     </div>
@@ -1008,20 +957,6 @@ const MeetingRoom = () => {
                             )}
                         </div>
                     </div>
-
-                    {/* Captions Overlay */}
-                    {isCaptioning && captions.length > 0 && (
-                        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 w-full max-w-2xl px-6 pointer-events-none z-50">
-                            <div className="bg-black/60 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-2xl text-center">
-                                {captions.map(c => (
-                                    <p key={c.id} className="text-sm md:text-lg font-medium text-white/90 animate-in slide-in-from-bottom-2">
-                                        <span className="text-blue-400 font-black mr-2 uppercase text-[10px] tracking-widest">{c.sender}:</span>
-                                        {c.text}
-                                    </p>
-                                ))}
-                            </div>
-                        </div>
-                    )}
 
                     {/* Floating Self Video - Bottom Right */}
                     <div className={`fixed bottom-28 right-8 w-60 md:w-80 aspect-video rounded-2xl overflow-hidden shadow-2xl border-2 transition-all duration-500 z-50 group ${isSpeaking ? 'border-blue-500 shadow-[0_0_40px_rgba(59,130,246,0.4)]' : 'border-white/20 hover:border-white/40'}`}>
@@ -1096,10 +1031,6 @@ const MeetingRoom = () => {
                     <button onClick={toggleHand}
                         className={`p-4 rounded-2xl transition-all ${raisedHands['me'] ? 'bg-blue-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.5)]' : 'bg-zinc-900 border border-white/10 text-gray-400 hover:text-white'}`}>
                         <Hand size={20} />
-                    </button>
-                    <button onClick={toggleCaptions}
-                        className={`p-4 rounded-2xl transition-all ${isCaptioning ? 'bg-white text-black' : 'bg-zinc-900 border border-white/10 text-gray-400 hover:text-white'}`}>
-                        <Captions size={20} />
                     </button>
                     <button onClick={toggleFullScreen}
                         className={`p-4 rounded-2xl bg-zinc-900 border border-white/10 text-gray-400 hover:text-white transition-all`}>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { ethers } from 'ethers';
 import { SYNOX_ADDRESS, SYNOX_ABI } from '../utils/contract';
-import { Plus, Check, Clock, ExternalLink, Share2, Copy, ShieldCheck, ShieldAlert, Play, X, Lock, Unlock, Zap } from 'lucide-react';
+import { Plus, Check, Clock, ExternalLink, Share2, Copy, ShieldCheck, ShieldAlert, Play, X, Lock, Unlock, Zap, Hash, Globe } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 
@@ -128,7 +128,7 @@ const Dashboard = () => {
         setLoading(true);
         try {
             // Jitsi Meet rooms are created on the fly, no API call needed
-            const huddleId = manualHuddleId || `synox-${Math.random().toString(36).substring(7)}`;
+            const huddleId = manualHuddleId || `synox09-${Math.random().toString(36).substring(7)}`;
 
             const contract = new ethers.Contract(SYNOX_ADDRESS, SYNOX_ABI, signer);
             const tx = await contract.createMeeting(title, huddleId);

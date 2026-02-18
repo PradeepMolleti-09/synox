@@ -23,7 +23,7 @@ const Landing = () => {
         <div className="min-h-screen bg-black text-white relative selection:bg-white selection:text-black">
             {/* New Premium Hero Section */}
             <BackgroundPaths
-                title="SYNOX"
+                title="SyNox09"
                 subtitle="The future of tamper-proof meetings and on-chain governance."
                 onAction={handleEnter}
                 account={account}
@@ -77,7 +77,7 @@ const Landing = () => {
                     >
                         <h2 className="text-4xl md:text-6xl lg:text-8xl font-black tracking-tighter mb-8 leading-none uppercase">THE PROOF IS <br className="hidden md:block" /> ON-CHAIN.</h2>
                         <p className="text-lg md:text-xl text-zinc-600 leading-relaxed font-medium mb-12 uppercase tracking-tight">
-                            Every meeting finalized on SYNOX creates a unique cryptographic signature.
+                            Every meeting finalized on SyNox09 creates a unique cryptographic signature.
                             This signature is stored on the Ethereum blockchain, linking your encrypted
                             recording to an immutable timestamp.
                         </p>
@@ -104,7 +104,7 @@ const Landing = () => {
                             <div className="w-3 h-3 rounded-full bg-yellow-400"></div>
                             <div className="w-3 h-3 rounded-full bg-green-400"></div>
                         </div>
-                        <p className="text-black/40">// DEPLOYING SYNOX_INFRASTRUCTURE</p>
+                        <p className="text-black/40">// DEPLOYING SYNOX09_INFRASTRUCTURE</p>
                         <p className="text-black inline-block">Contract: 0xC776...BFF3</p>
                         <p className="text-black">Status: <span className="text-green-600">ENCRYPTED_SUCCESS</span></p>
                         <p className="text-black">CID: QmXy...pZ9a</p>
@@ -186,7 +186,7 @@ const Landing = () => {
                         <div className="max-w-sm">
                             <div className="flex items-center gap-2 mb-6">
                                 <Shield className="w-8 h-8 text-white" />
-                                <span className="text-2xl font-black tracking-widest text-white">SYNOX</span>
+                                <span className="text-2xl font-black tracking-widest text-white">SyNox09</span>
                             </div>
                             <p className="text-gray-500 text-sm leading-relaxed uppercase tracking-widest font-medium">
                                 A decentralized, tamper-proof meeting and governance infrastructure built on the Ethereum blockchain.
@@ -214,7 +214,7 @@ const Landing = () => {
                     </div>
 
                     <div className="flex flex-col md:flex-row justify-between items-center gap-4 border-t border-white/5 pt-12">
-                        <p className="text-gray-600 text-[10px] font-mono">© 2026 SYNOX PROTOCOL // DECENTRALIZED INFRASTRUCTURE</p>
+                        <p className="text-gray-600 text-[10px] font-mono">© 2026 SyNox09 PROTOCOL // DECENTRALIZED INFRASTRUCTURE</p>
                         <div className="flex gap-8 text-[10px] font-mono text-zinc-600">
                             <span>SEPOLIA_TESTNET</span>
                             <span>VERSION_1.0.42</span>
