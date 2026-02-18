@@ -197,6 +197,15 @@ const MeetingRoom = () => {
     };
 
     // ── RTCPeerConnection factory ─────────────────────────────────────────────
+    const removePeer = useCallback((peerID) => {
+        if (pcsRef.current[peerID]) {
+            pcsRef.current[peerID].close();
+            delete pcsRef.current[peerID];
+        }
+        setPeers(prev => prev.filter(p => p.peerID !== peerID));
+        setRemoteStatus(prev => { const n = { ...prev }; delete n[peerID]; return n; });
+    }, []);
+
     const createPC = useCallback((peerID, socket) => {
         const pc = new RTCPeerConnection(ICE_SERVERS);
 
@@ -214,9 +223,27 @@ const MeetingRoom = () => {
         };
 
         pc.oniceconnectionstatechange = () => {
-            console.log(`[${peerID.slice(0, 6)}] ICE state: ${pc.iceConnectionState}`);
-            if (pc.iceConnectionState === 'failed') {
+            const state = pc.iceConnectionState;
+            console.log(`[${peerID.slice(0, 6)}] ICE state: ${state}`);
+            if (state === 'failed') {
                 pc.restartIce();
+            }
+            // Remove ghost peer if connection definitively closed
+            if (state === 'closed' || state === 'disconnected') {
+                // Give 5s grace period for reconnect before removing
+                setTimeout(() => {
+                    if (pc.iceConnectionState === 'closed' || pc.iceConnectionState === 'disconnected') {
+                        removePeer(peerID);
+                    }
+                }, 5000);
+            }
+        };
+
+        pc.onconnectionstatechange = () => {
+            const state = pc.connectionState;
+            console.log(`[${peerID.slice(0, 6)}] Connection state: ${state}`);
+            if (state === 'failed' || state === 'closed') {
+                removePeer(peerID);
             }
         };
 
@@ -231,7 +258,7 @@ const MeetingRoom = () => {
         };
 
         return pc;
-    }, []);
+    }, [removePeer]);
 
     // ── WebRTC + Socket Setup ─────────────────────────────────────────────────
     useEffect(() => {
@@ -251,7 +278,9 @@ const MeetingRoom = () => {
 
             const socket = io(SIGNALING_SERVER, {
                 transports: ['websocket', 'polling'],
-                reconnectionAttempts: 5,
+                reconnectionAttempts: 10,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000,
             });
             socketRef.current = socket;
 
@@ -260,19 +289,32 @@ const MeetingRoom = () => {
                 socket.emit("join-room", huddleId);
             });
 
+            // On reconnect: close all stale PCs, clear peer list, rejoin
+            socket.on('reconnect', () => {
+                addEvent("NETWORK", "Reconnected. Re-establishing peer connections...");
+                Object.values(pcsRef.current).forEach(pc => pc.close());
+                pcsRef.current = {};
+                setPeers([]);
+                socket.emit("join-room", huddleId);
+            });
+
             // ── Joiner receives existing users → initiates offers ──
             socket.on("all-users", async (users) => {
                 addEvent("NETWORK", `${users.length} peer(s) in room. Establishing connections...`);
 
                 for (const userID of users) {
-                    if (pcsRef.current[userID]) continue;
+                    // Close stale PC if exists before creating new one
+                    if (pcsRef.current[userID]) {
+                        pcsRef.current[userID].close();
+                        delete pcsRef.current[userID];
+                    }
 
                     const pc = createPC(userID, socket);
                     pcsRef.current[userID] = pc;
 
                     setPeers(prev => {
-                        if (prev.find(p => p.peerID === userID)) return prev;
-                        return [...prev, { peerID: userID, pc, stream: null }];
+                        const filtered = prev.filter(p => p.peerID !== userID);
+                        return [...filtered, { peerID: userID, pc, stream: null, addedAt: Date.now() }];
                     });
 
                     try {
@@ -294,15 +336,18 @@ const MeetingRoom = () => {
             socket.on("offer", async (payload) => {
                 const { callerID, signal } = payload;
 
-                let pc = pcsRef.current[callerID];
-                if (!pc) {
-                    pc = createPC(callerID, socket);
-                    pcsRef.current[callerID] = pc;
-                    setPeers(prev => {
-                        if (prev.find(p => p.peerID === callerID)) return prev;
-                        return [...prev, { peerID: callerID, pc, stream: null }];
-                    });
+                // Always create fresh PC for incoming offer (handles reconnect)
+                if (pcsRef.current[callerID]) {
+                    pcsRef.current[callerID].close();
+                    delete pcsRef.current[callerID];
                 }
+
+                const pc = createPC(callerID, socket);
+                pcsRef.current[callerID] = pc;
+                setPeers(prev => {
+                    const filtered = prev.filter(p => p.peerID !== callerID);
+                    return [...filtered, { peerID: callerID, pc, stream: null, addedAt: Date.now() }];
+                });
 
                 try {
                     await pc.setRemoteDescription(new RTCSessionDescription(signal));
@@ -341,12 +386,7 @@ const MeetingRoom = () => {
             // ── User left ──
             socket.on("user-left", (userID) => {
                 addEvent("NETWORK", `Peer disconnected: ${userID.slice(0, 8)}...`);
-                if (pcsRef.current[userID]) {
-                    pcsRef.current[userID].close();
-                    delete pcsRef.current[userID];
-                }
-                setPeers(prev => prev.filter(p => p.peerID !== userID));
-                setRemoteStatus(prev => { const n = { ...prev }; delete n[userID]; return n; });
+                removePeer(userID);
             });
 
             socket.on('disconnect', () => {
@@ -356,13 +396,36 @@ const MeetingRoom = () => {
 
         connect();
 
+        // ── Ghost peer sweeper: remove peers with no stream after 10s ──
+        const ghostSweeper = setInterval(() => {
+            setPeers(prev => {
+                const now = Date.now();
+                const alive = prev.filter(p => {
+                    if (p.stream) return true; // has stream, keep
+                    if (!p.addedAt) return true; // no timestamp yet, keep
+                    if (now - p.addedAt > 10000) {
+                        // No stream after 10s → ghost, remove
+                        console.warn(`[Ghost sweep] Removing peer ${p.peerID.slice(0, 8)} (no stream after 10s)`);
+                        if (pcsRef.current[p.peerID]) {
+                            pcsRef.current[p.peerID].close();
+                            delete pcsRef.current[p.peerID];
+                        }
+                        return false;
+                    }
+                    return true;
+                });
+                return alive.length !== prev.length ? alive : prev;
+            });
+        }, 5000);
+
         return () => {
+            clearInterval(ghostSweeper);
             if (socketRef.current) socketRef.current.disconnect();
             Object.values(pcsRef.current).forEach(pc => pc.close());
             pcsRef.current = {};
             setPeers([]);
         };
-    }, [hasJoined, huddleId]);
+    }, [hasJoined, huddleId, removePeer]);
 
     // ── Data channel for status/hand (via socket relay) ──────────────────────
     const broadcastStatus = useCallback((payload) => {
