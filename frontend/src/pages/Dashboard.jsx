@@ -58,7 +58,16 @@ const Dashboard = () => {
                 encryptedBuffer = await response.arrayBuffer();
             }
 
-            const decryptedArrayBuffer = await decryptFile(new Uint8Array(encryptedBuffer), signature);
+            // Primary Attempt: Use huddleId as key seed (shared among participants)
+            // Second Attempt (Fallback): Use signature (for older host-only recordings)
+            let decryptedArrayBuffer;
+            try {
+                decryptedArrayBuffer = await decryptFile(new Uint8Array(encryptedBuffer), viewingRecording.huddleId);
+            } catch (err) {
+                console.warn("HuddleId decryption failed, trying signature fallback...");
+                decryptedArrayBuffer = await decryptFile(new Uint8Array(encryptedBuffer), signature);
+            }
+
             const header = new Uint8Array(decryptedArrayBuffer.slice(0, 4));
             const isVideo = header[0] === 0x1A && header[1] === 0x45;
 
@@ -107,7 +116,9 @@ const Dashboard = () => {
                     host: m.host,
                     active: m.isActive,
                     createdTime: Number(m.createdTime),
-                    cid: m.recordingCID
+                    cid: m.recordingCID,
+                    isHost: m.host.toLowerCase() === account?.toLowerCase(),
+                    isParticipant: await contract.isParticipant(i, account)
                 });
             }
             const filteredItems = isArchiveView ? items : items.filter(m => m.active);
@@ -121,13 +132,12 @@ const Dashboard = () => {
 
     useEffect(() => {
         fetchMeetings();
-    }, [provider, isArchiveView]);
+    }, [provider, isArchiveView, account]);
 
     const createMeeting = async () => {
         if (!title || !signer) return;
         setLoading(true);
         try {
-            // Jitsi Meet rooms are created on the fly, no API call needed
             const huddleId = manualHuddleId || `synox09-${Math.random().toString(36).substring(7)}`;
 
             const contract = new ethers.Contract(SYNOX_ADDRESS, SYNOX_ABI, signer);
@@ -228,7 +238,9 @@ const Dashboard = () => {
                                     {!m.active && (
                                         <button
                                             onClick={() => startPlayback(m)}
-                                            className="bg-white text-black py-3 rounded-xl font-black text-[9px] tracking-[0.2em] hover:bg-zinc-200 transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-white/5"
+                                            className="bg-white text-black py-3 rounded-xl font-black text-[9px] tracking-[0.2em] hover:bg-zinc-200 transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
+                                            disabled={!m.isHost && !m.isParticipant}
+                                            title={(!m.isHost && !m.isParticipant) ? "Access Restricted to Participants" : "View Recording"}
                                         >
                                             <Play size={10} fill="black" /> PLAYBACK
                                         </button>
@@ -308,11 +320,19 @@ const Dashboard = () => {
                                     className="px-12 py-5 bg-white text-black rounded-2xl font-black tracking-[0.3em] uppercase text-xs hover:bg-blue-400 hover:text-white transition-all shadow-2xl shadow-white/5 flex items-center gap-4 disabled:opacity-50 group"
                                 >
                                     {isDecrypting ? <Activity className="animate-spin" /> : <Unlock className="group-hover:rotate-12 transition-transform" />}
-                                    {isDecrypting ? "DECRYPTING..." : "DECRYPT & AUTHORIZE"}
+                                    {isDecrypting ? "DECRYPT & AUTHORIZE" : "DECRYPT & AUTHORIZE"}
+                                </button>
+
+                                {/* "Wrong" button to close as requested */}
+                                <button
+                                    onClick={() => setViewingRecording(null)}
+                                    className="mt-8 flex items-center gap-2 text-[10px] font-black tracking-widest text-red-500/50 hover:text-red-500 transition-colors uppercase"
+                                >
+                                    <X size={14} /> WRONG SESSION / CLOSE
                                 </button>
                             </div>
                         ) : (
-                            <div className="h-full w-full relative group aspect-video bg-black">
+                            <div className="h-full w-full relative group aspect-video bg-black overflow-hidden">
                                 {typeof playbackUrl === 'string' ? (
                                     <video
                                         className="h-full w-full object-contain"
@@ -321,14 +341,54 @@ const Dashboard = () => {
                                         src={playbackUrl}
                                     />
                                 ) : playbackUrl?.type === 'json' ? (
-                                    <div className="flex flex-col items-center justify-center h-full p-12 text-center bg-zinc-950">
-                                        <ShieldCheck className="w-20 h-20 text-blue-500 mb-8" />
-                                        <h3 className="text-2xl font-black tracking-tighter uppercase mb-2">Verified Ledger Shard</h3>
-                                        <p className="text-zinc-500 text-[10px] font-mono mb-12 max-w-md uppercase tracking-widest leading-none">Participant proof verified. No video buffer captured.</p>
-                                        <pre className="bg-black/80 p-8 rounded-[2rem] border border-white/5 text-[11px] font-mono text-left max-h-[300px] overflow-y-auto w-full text-blue-400 shadow-2xl">
-                                            {JSON.stringify(playbackUrl.data, null, 2)}
-                                        </pre>
-                                    </div>
+                                    <>
+                                        {/* Floating Ledge Data Container - Mobile Nav Bar Style */}
+                                        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-[95%] max-w-2xl bg-zinc-900/80 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 shadow-2xl flex items-center justify-between z-30 transition-all hover:scale-[1.02]">
+                                            <div className="flex items-center gap-4 overflow-hidden">
+                                                <div className="bg-blue-500/20 p-2 rounded-xl shrink-0">
+                                                    <ShieldCheck className="text-blue-500" size={20} />
+                                                </div>
+                                                <div className="truncate">
+                                                    <h3 className="text-[10px] font-black tracking-tighter uppercase leading-none mb-1">Session Ledger Shard</h3>
+                                                    <div className="flex items-center gap-2 text-[8px] text-blue-400 font-mono">
+                                                        <span className="opacity-50 uppercase tracking-widest">Data:</span>
+                                                        <span className="truncate max-w-[150px]">{JSON.stringify(playbackUrl.data)}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => {
+                                                        const blob = new Blob([JSON.stringify(playbackUrl.data, null, 2)], { type: 'application/json' });
+                                                        const url = URL.createObjectURL(blob);
+                                                        const a = document.createElement('a');
+                                                        a.href = url;
+                                                        a.download = `session-${viewingRecording.id}-ledger.json`;
+                                                        a.click();
+                                                    }}
+                                                    className="bg-white/5 hover:bg-white/10 p-2 rounded-xl transition-all text-white/50 hover:text-white"
+                                                    title="Download Ledger"
+                                                >
+                                                    <Hash size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={() => setViewingRecording(null)}
+                                                    className="bg-red-500 text-white p-2 rounded-xl hover:bg-red-600 transition-all shadow-lg shadow-red-500/20"
+                                                    title="Close View"
+                                                >
+                                                    <X size={18} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col items-center justify-center h-full p-12 text-center bg-zinc-950">
+                                            <div className="relative">
+                                                <div className="absolute inset-0 bg-blue-500/5 blur-3xl rounded-full" />
+                                                <Globe className="w-32 h-32 text-zinc-900 relative z-10 animate-pulse" />
+                                            </div>
+                                            <h3 className="text-zinc-800 font-mono text-[9px] mt-8 uppercase tracking-[0.5em]">Cryptographic Protocol active</h3>
+                                            <p className="text-zinc-600 text-[8px] mt-2 uppercase tracking-widest">Interactive ledger data visible in the control panel below</p>
+                                        </div>
+                                    </>
                                 ) : null}
                                 <div className="absolute top-6 left-6 flex flex-col gap-2 z-10 pointer-events-none">
                                     <div className="bg-green-500/20 border border-green-500/40 px-4 py-2 rounded-xl backdrop-blur-xl flex items-center gap-2 shadow-2xl">
@@ -343,6 +403,12 @@ const Dashboard = () => {
                                             {viewingRecording.cid.slice(0, 15)}...
                                         </span>
                                     </div>
+                                    <button
+                                        onClick={() => setViewingRecording(null)}
+                                        className="mt-4 pointer-events-auto bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 px-4 py-2 rounded-xl text-[8px] font-black tracking-[0.2em] uppercase transition-all flex items-center gap-2"
+                                    >
+                                        <X size={10} /> WRONG SESSION
+                                    </button>
                                 </div>
                             </div>
                         )}

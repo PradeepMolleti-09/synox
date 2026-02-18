@@ -788,7 +788,10 @@ const MeetingRoom = () => {
                 })], { type: 'application/json' });
             }
 
-            const { encrypted } = await encryptFile(new Uint8Array(await blobToEncrypt.arrayBuffer()), signature);
+            // Use huddleId as the key seed instead of signature to allow all participants to decrypt.
+            // Even though huddleId is on-chain, it acts as the shared session key for the protocol.
+            const keySeed = huddleId;
+            const { encrypted } = await encryptFile(new Uint8Array(await blobToEncrypt.arrayBuffer()), keySeed);
             addEvent("PROCESS", "Uploading to IPFS...");
             const _cid = await uploadToIPFS(encrypted);
             setCid(_cid);
