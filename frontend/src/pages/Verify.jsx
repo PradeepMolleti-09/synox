@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useWallet } from '../hooks/useWallet';
 import { ethers } from 'ethers';
 import { SYNOX_ADDRESS, SYNOX_ABI } from '../utils/contract';
-import { ShieldCheck, Hash, Search, FileCheck, XCircle } from 'lucide-react';
+import { ShieldCheck, Hash, Search, FileCheck, XCircle, ExternalLink, Globe } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
 const Verify = () => {
@@ -119,10 +119,27 @@ const Verify = () => {
                         </div>
                         {onChainCid && (
                             <div className="text-xs font-mono bg-black/20 p-4 rounded-lg border border-white/10">
-                                <p className="text-gray-400 mb-2">ON-CHAIN HASH:</p>
-                                <p className="text-white break-all">{onChainCid || "(empty)"}</p>
-                                <p className="text-gray-400 mt-3 mb-2">YOUR INPUT:</p>
-                                <p className="text-white break-all">{cid}</p>
+                                <p className="text-gray-400 mb-2 uppercase tracking-widest text-[8px] font-black">On-Chain Registry Hash:</p>
+                                <p className="text-white break-all mb-4">{onChainCid || "(VOID)"}</p>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 pt-4 border-t border-white/5">
+                                    <a
+                                        href={`https://sepolia.etherscan.io/address/${SYNOX_ADDRESS}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="flex items-center justify-center gap-2 bg-blue-600/10 border border-blue-600/30 text-blue-400 py-2.5 rounded-xl hover:bg-blue-600 hover:text-white transition-all text-[9px] font-black tracking-widest uppercase"
+                                    >
+                                        <ExternalLink size={12} /> View Contract
+                                    </a>
+                                    <a
+                                        href={`https://gateway.pinata.cloud/ipfs/${onChainCid}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="flex items-center justify-center gap-2 bg-white/5 border border-white/10 text-gray-400 py-2.5 rounded-xl hover:bg-white/10 hover:text-white transition-all text-[9px] font-black tracking-widest uppercase"
+                                    >
+                                        <Globe size={12} /> Raw IPFS Data
+                                    </a>
+                                </div>
                             </div>
                         )}
                     </div>

@@ -32,47 +32,33 @@ const Dashboard = () => {
         return () => { document.body.style.overflow = 'unset'; };
     }, [viewingRecording]);
 
-    const openPlayback = async (m) => {
-        if (!signer) {
-            showToast("Connect wallet to view encrypted archives.", "warning");
-            return;
-        }
-        if (!m.cid || m.cid === "" || m.cid === "NOT_FINALIZED") {
-            showToast("No encrypted archive found for this session.", "error");
-            return;
-        }
-
+    const startPlayback = (m) => {
         setViewingRecording(m);
-        setIsDecrypting(true);
         setDecrypted(false);
         setPlaybackUrl(null);
+    };
+
+    const handleDecrypt = async () => {
+        if (!signer || !viewingRecording) return;
+        setIsDecrypting(true);
 
         try {
             const { getSessionSignatureMessage, decryptFile } = await import('../utils/storage');
-
-            // Request signature to derive decryption key
-            const msg = getSessionSignatureMessage(m.id);
+            const msg = getSessionSignatureMessage(viewingRecording.id);
             const signature = await signer.signMessage(msg);
 
             let encryptedBuffer;
-
-            // Handle Demo Mode Fallback
-            if (m.cid.startsWith("QmDemo")) {
-                const demoData = sessionStorage.getItem(m.cid);
+            if (viewingRecording.cid.startsWith("QmDemo")) {
+                const demoData = sessionStorage.getItem(viewingRecording.id.startsWith('QmDemo') ? viewingRecording.id : viewingRecording.cid);
                 if (!demoData) throw new Error("Demo archive lost. Use a real IPFS provider for persistence.");
                 encryptedBuffer = await (await fetch(demoData)).arrayBuffer();
             } else {
-                // Fetch from real IPFS
-                const response = await fetch(`https://gateway.pinata.cloud/ipfs/${m.cid}`);
+                const response = await fetch(`https://gateway.pinata.cloud/ipfs/${viewingRecording.cid}`);
                 if (!response.ok) throw new Error("IPFS retrieval failed. Gateway might be congested.");
                 encryptedBuffer = await response.arrayBuffer();
             }
 
-            // Decrypt the file
             const decryptedArrayBuffer = await decryptFile(new Uint8Array(encryptedBuffer), signature);
-
-            // Detect if it's video or JSON metadata
-            // WebM files start with [0x1A, 0x45, 0xDF, 0xA3] (EBML header)
             const header = new Uint8Array(decryptedArrayBuffer.slice(0, 4));
             const isVideo = header[0] === 0x1A && header[1] === 0x45;
 
@@ -80,7 +66,6 @@ const Dashboard = () => {
                 const url = URL.createObjectURL(new Blob([decryptedArrayBuffer], { type: 'video/webm' }));
                 setPlaybackUrl(url);
             } else {
-                // It's likely JSON metadata
                 const text = new TextDecoder().decode(decryptedArrayBuffer);
                 try {
                     const json = JSON.parse(text);
@@ -90,10 +75,10 @@ const Dashboard = () => {
                 }
             }
             setDecrypted(true);
+            showToast("Archive Decrypted Successfully", "success");
         } catch (e) {
             console.error("Decryption failed:", e);
             showToast("Security Violation: " + e.message, "error");
-            setViewingRecording(null);
         } finally {
             setIsDecrypting(false);
         }
@@ -242,8 +227,8 @@ const Dashboard = () => {
                                 <div className="mt-8 relative z-10 grid grid-cols-2 gap-2">
                                     {!m.active && (
                                         <button
-                                            onClick={() => openPlayback(m)}
-                                            className="bg-white text-black py-2.5 rounded-lg font-black text-[9px] tracking-[0.2em] hover:bg-zinc-200 transition-all flex items-center justify-center gap-1.5"
+                                            onClick={() => startPlayback(m)}
+                                            className="bg-white text-black py-3 rounded-xl font-black text-[9px] tracking-[0.2em] hover:bg-zinc-200 transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-white/5"
                                         >
                                             <Play size={10} fill="black" /> PLAYBACK
                                         </button>
@@ -295,57 +280,72 @@ const Dashboard = () => {
                         <X size={32} />
                     </button>
 
-                    <div className="w-full max-w-5xl aspect-video rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-zinc-900 relative">
-                        {isDecrypting ? (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black">
-                                <Lock className="w-16 h-16 text-blue-500 mb-6 animate-bounce" />
-                                <h2 className="text-xl font-black tracking-[0.3em] uppercase mb-4">Decrypting Archive</h2>
-                                <div className="w-64 h-1 bg-white/10 rounded-full overflow-hidden mb-8">
-                                    <div className="h-full bg-blue-500 animate-[loading_3s_ease-in-out_infinite]"></div>
+                    <div className="w-full max-w-5xl overflow-hidden rounded-[2rem] border border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.8)] bg-zinc-950 relative flex flex-col">
+                        {!decrypted ? (
+                            <div className="p-12 md:p-20 text-center flex flex-col items-center justify-center">
+                                <div className="w-24 h-24 bg-blue-500/10 rounded-3xl flex items-center justify-center mb-8 border border-blue-500/20 shadow-2xl relative group">
+                                    <Lock className="text-blue-500 group-hover:scale-110 transition-transform" size={40} />
+                                    <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 rounded-full animate-pulse" />
                                 </div>
-                                <div className="space-y-2 font-mono text-[8px] text-blue-400/50 uppercase tracking-widest text-center">
-                                    <p>Retrieving CID: {viewingRecording.cid}</p>
-                                    <p>Verifying Blockchain Signature...</p>
-                                    <p>Initializing AES-GCM 256-bit Decryption...</p>
-                                    <p>Reconstructing encrypted shards...</p>
+                                <h2 className="text-3xl font-black tracking-tighter uppercase mb-4">Encrypted Session Archive</h2>
+                                <p className="text-zinc-500 text-xs md:text-sm font-medium uppercase tracking-widest max-w-md mb-12 leading-relaxed">
+                                    The proof for this session is sealed with AES-GCM-256. Provide your cryptographic signature to derive the shared meeting key.
+                                </p>
+
+                                <div className="w-full max-w-md bg-white/[0.02] border border-white/10 rounded-2xl p-6 mb-12 text-left relative overflow-hidden group">
+                                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                                        <Hash size={40} />
+                                    </div>
+                                    <span className="text-[10px] font-black text-blue-500 tracking-[0.2em] uppercase block mb-3">Protocol CID (Hash)</span>
+                                    <p className="text-xs font-mono text-zinc-300 break-all leading-relaxed select-all">
+                                        {viewingRecording.cid}
+                                    </p>
                                 </div>
+
+                                <button
+                                    onClick={handleDecrypt}
+                                    disabled={isDecrypting}
+                                    className="px-12 py-5 bg-white text-black rounded-2xl font-black tracking-[0.3em] uppercase text-xs hover:bg-blue-400 hover:text-white transition-all shadow-2xl shadow-white/5 flex items-center gap-4 disabled:opacity-50 group"
+                                >
+                                    {isDecrypting ? <Activity className="animate-spin" /> : <Unlock className="group-hover:rotate-12 transition-transform" />}
+                                    {isDecrypting ? "DECRYPTING..." : "DECRYPT & AUTHORIZE"}
+                                </button>
                             </div>
-                        ) : decrypted ? (
-                            <div className="h-full w-full relative group bg-zinc-950">
+                        ) : (
+                            <div className="h-full w-full relative group aspect-video bg-black">
                                 {typeof playbackUrl === 'string' ? (
                                     <video
-                                        className="h-full w-full object-cover"
+                                        className="h-full w-full object-contain"
                                         autoPlay
                                         controls
                                         src={playbackUrl}
                                     />
                                 ) : playbackUrl?.type === 'json' ? (
-                                    <div className="flex flex-col items-center justify-center h-full p-12 text-center">
-                                        <ShieldCheck className="w-16 h-16 text-blue-500 mb-6" />
-                                        <h3 className="text-xl font-black tracking-widest uppercase mb-4">Metadata Archive</h3>
-                                        <p className="text-zinc-500 text-[10px] font-mono mb-8 max-w-md">No video proof was captured. This session contains the verified participant ledger only.</p>
-                                        <pre className="bg-black/50 p-6 rounded-2xl border border-white/10 text-[10px] font-mono text-left max-h-[200px] overflow-y-auto w-full text-blue-400">
+                                    <div className="flex flex-col items-center justify-center h-full p-12 text-center bg-zinc-950">
+                                        <ShieldCheck className="w-20 h-20 text-blue-500 mb-8" />
+                                        <h3 className="text-2xl font-black tracking-tighter uppercase mb-2">Verified Ledger Shard</h3>
+                                        <p className="text-zinc-500 text-[10px] font-mono mb-12 max-w-md uppercase tracking-widest leading-none">Participant proof verified. No video buffer captured.</p>
+                                        <pre className="bg-black/80 p-8 rounded-[2rem] border border-white/5 text-[11px] font-mono text-left max-h-[300px] overflow-y-auto w-full text-blue-400 shadow-2xl">
                                             {JSON.stringify(playbackUrl.data, null, 2)}
                                         </pre>
                                     </div>
                                 ) : null}
-                                <div className="absolute top-6 left-6 flex flex-col gap-2">
-                                    <div className="bg-green-500/20 border border-green-500/40 px-3 py-1 rounded-full backdrop-blur-md flex items-center gap-2">
-                                        <Unlock size={12} className="text-green-500" />
-                                        <span className="text-[10px] font-black tracking-widest text-green-500 uppercase">
-                                            {typeof playbackUrl === 'string' ? "Video Proof" : "Metadata Ledger"}
+                                <div className="absolute top-6 left-6 flex flex-col gap-2 z-10 pointer-events-none">
+                                    <div className="bg-green-500/20 border border-green-500/40 px-4 py-2 rounded-xl backdrop-blur-xl flex items-center gap-2 shadow-2xl">
+                                        <Unlock size={14} className="text-green-500" />
+                                        <span className="text-[10px] font-black tracking-[0.2em] text-green-500 uppercase">
+                                            {typeof playbackUrl === 'string' ? "LIVE PROOF" : "LEDGER ONLY"}
                                         </span>
                                     </div>
-                                    <div className="bg-black/40 border border-white/10 px-3 py-1 rounded-full backdrop-blur-md flex items-center gap-2">
-                                        <Zap size={12} className="text-blue-400" />
-                                        <span className="text-[10px] font-black tracking-widest text-white/70 uppercase">
-                                            {viewingRecording.cid.startsWith("QmDemo") ? "Demo Cache" : `IPFS: ${viewingRecording.cid.slice(0, 10)}...`}
+                                    <div className="bg-black/60 border border-white/10 px-4 py-2 rounded-xl backdrop-blur-xl flex items-center gap-2 shadow-2xl">
+                                        <Zap size={14} className="text-blue-400" />
+                                        <span className="text-[10px] font-black tracking-[0.2em] text-white/70 uppercase">
+                                            {viewingRecording.cid.slice(0, 15)}...
                                         </span>
                                     </div>
                                 </div>
-
                             </div>
-                        ) : null}
+                        )}
                     </div>
                 </div>
             )}
