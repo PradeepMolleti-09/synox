@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { ethers } from 'ethers';
 import { SYNOX_ADDRESS, SYNOX_ABI } from '../utils/contract';
-import { Plus, Check, Clock, ExternalLink, Share2, Copy, ShieldCheck, ShieldAlert, Play, X, Lock, Unlock, Zap, Hash, Globe } from 'lucide-react';
+import { Plus, Check, Clock, ExternalLink, Share2, Copy, ShieldCheck, ShieldAlert, Play, X, Lock, Unlock, Zap, Hash, Globe, Activity } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 
@@ -49,7 +49,7 @@ const Dashboard = () => {
 
             let encryptedBuffer;
             if (viewingRecording.cid.startsWith("QmDemo")) {
-                const demoData = sessionStorage.getItem(viewingRecording.id.startsWith('QmDemo') ? viewingRecording.id : viewingRecording.cid);
+                const demoData = sessionStorage.getItem(viewingRecording.cid);
                 if (!demoData) throw new Error("Demo archive lost. Use a real IPFS provider for persistence.");
                 encryptedBuffer = await (await fetch(demoData)).arrayBuffer();
             } else {

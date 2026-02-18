@@ -39,7 +39,7 @@ export const encryptFile = async (fileBuffer, keySeed) => {
  * Must be identical for both encryption and decryption.
  */
 export const getSessionSignatureMessage = (roomId) => {
-    return `Authorize SYNOX Secure Access for Session: ${roomId}\n\nThis cryptographic signature will be used to derive your private AES-GCM-256 session key.`;
+    return `Authorize SyNox09 Secure Access for Session: ${roomId}\n\nThis cryptographic signature will be used to derive your private AES-GCM-256 session key.`;
 };
 
 /**
