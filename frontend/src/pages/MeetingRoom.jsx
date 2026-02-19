@@ -55,11 +55,11 @@ const RemoteVideo = ({ stream, peerId, name, isHandRaised, isSpeaking, isVideoOn
                 autoPlay
                 playsInline
                 data-peer={peerId}
-                className={`w-full h-full object-cover transform scale-x-[-1] transition-transform duration-700 group-hover:scale-105 ${!isVideoOn ? 'hidden' : ''}`}
+                className={`w-full h-full object-cover transform scale-x-[-1] transition-transform duration-700 ${!isVideoOn ? 'hidden' : ''}`}
             />
             {!isVideoOn && (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-800 absolute inset-0">
-                    <img src={avatarUrl} alt="Avatar" className="w-20 h-20 md:w-24 md:h-24 rounded-full border-4 border-white/5 shadow-2xl group-hover:scale-110 transition-transform duration-500" />
+                    <img src={avatarUrl} alt="Avatar" className="w-20 h-20 md:w-24 md:h-24 rounded-full border-4 border-white/5 shadow-2xl transition-transform duration-500" />
                 </div>
             )}
 
@@ -1061,10 +1061,10 @@ const MeetingRoom = () => {
                                 className={`relative bg-zinc-900 rounded-2xl overflow-hidden transition-all duration-500 border-2 ${isLocalSpeaking ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)] ring-2 ring-blue-500/20' : 'border-transparent'} aspect-video group`}
                             >
                                 <video ref={localVideoRef} autoPlay muted playsInline
-                                    className={`w-full h-full object-cover transform scale-x-[-1] transition-transform duration-700 group-hover:scale-105 ${!isVideoOn ? 'hidden' : ''}`} />
+                                    className={`w-full h-full object-cover transform scale-x-[-1] transition-transform duration-700 ${!isVideoOn ? 'hidden' : ''}`} />
                                 {!isVideoOn && (
                                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-800 transition-all duration-500">
-                                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${account}`} alt="Me" className="w-20 h-20 md:w-24 md:h-24 rounded-full border border-white/10 shadow-2xl group-hover:scale-110 transition-transform duration-500" />
+                                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${account}`} alt="Me" className="w-20 h-20 md:w-24 md:h-24 rounded-full border border-white/10 shadow-2xl transition-transform duration-500" />
                                     </div>
                                 )}
 
