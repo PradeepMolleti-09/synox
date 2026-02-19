@@ -41,7 +41,14 @@ export const WalletProvider = ({ children }) => {
                 console.error("Connection error:", error);
             }
         } else {
-            showToast("Please install MetaMask!", "error");
+            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+            if (isMobile) {
+                // Deep link to open the app in MetaMask's internal browser
+                const dappUrl = window.location.href.split('://')[1];
+                window.location.href = `https://metamask.app.link/dapp/${dappUrl}`;
+            } else {
+                showToast("Please install MetaMask extension!", "error");
+            }
         }
     };
 
