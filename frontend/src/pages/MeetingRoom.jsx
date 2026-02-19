@@ -44,7 +44,7 @@ const RemoteVideo = ({ stream, peerId, name, isHandRaised, isSpeaking, isVideoOn
     }, [stream]);
 
     return (
-        <div className={`relative bg-zinc-900 rounded-2xl overflow-hidden transition-all duration-500 border-2 ${isSpeaking ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)]' : 'border-transparent'} ${isMobile ? 'aspect-[9/16]' : 'aspect-video'}`}>
+        <div className={`relative bg-zinc-900 rounded-2xl overflow-hidden transition-all duration-500 border-2 ${isSpeaking ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)]' : 'border-transparent'} aspect-video`}>
             <video
                 ref={ref}
                 autoPlay
@@ -122,7 +122,13 @@ const MeetingRoom = () => {
     const [isAudioOn, setIsAudioOn] = useState(true);
     const [localStream, setLocalStream] = useState(null);
     const [peers, setPeers] = useState([]); // [{ peerID, pc, stream }]
-    const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
+
+    useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth < 1024);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     // Hand Raise & Speaking
     const [raisedHands, setRaisedHands] = useState({});
@@ -212,10 +218,10 @@ const MeetingRoom = () => {
 
     // ── Body Scroll Lock ──────────────────────────────────────────────────────
     useEffect(() => {
-        if (showSidebar && window.innerWidth < 1024) document.body.style.overflow = 'hidden';
+        if (showSidebar && isMobile) document.body.style.overflow = 'hidden';
         else document.body.style.overflow = 'unset';
         return () => { document.body.style.overflow = 'unset'; };
-    }, [showSidebar]);
+    }, [showSidebar, isMobile]);
 
     // ── Media Init ────────────────────────────────────────────────────────────
     useEffect(() => {
@@ -518,10 +524,10 @@ const MeetingRoom = () => {
         if (socketRef.current) {
             socketRef.current.emit('broadcast-status', {
                 roomId: huddleId,
-                payload: { ...payload, isMobile: isMobileDevice, name: joinName || account?.slice(0, 8) }
+                payload: { ...payload, isMobile, name: joinName || account?.slice(0, 8) }
             });
         }
-    }, [huddleId, isMobileDevice, account]);
+    }, [huddleId, isMobile, account]);
 
     useEffect(() => {
         const socket = socketRef.current;
@@ -1035,7 +1041,7 @@ const MeetingRoom = () => {
 
             <div className="flex-1 flex flex-col overflow-hidden relative">
                 {/* Video Grid - Full Width Immersive */}
-                <main className={`flex-1 overflow-hidden bg-black flex flex-col relative w-full transition-all duration-500 ease-in-out px-4 py-4 ${showSidebar ? 'ml-[450px]' : 'ml-0'}`}>
+                <main className={`flex-1 overflow-hidden bg-black flex flex-col relative w-full transition-all duration-500 ease-in-out px-4 py-4 ${showSidebar && !isMobile ? 'lg:ml-[450px]' : 'ml-0'}`}>
                     {/* Secure Overlay */}
                     {!isWindowFocused && (
                         <div className="fixed inset-0 z-[200] bg-zinc-950/95 backdrop-blur-3xl flex flex-col items-center justify-center text-center p-12">
@@ -1048,14 +1054,14 @@ const MeetingRoom = () => {
                     )}
 
                     <div className="flex-1 overflow-hidden flex items-center justify-center">
-                        <div className={`grid gap-4 w-full h-full max-w-7xl mx-auto content-center ${peers.length + 1 === 1 ? 'grid-cols-1 max-w-4xl' :
+                        <div className={`grid gap-2 md:gap-4 w-full h-full max-w-7xl mx-auto content-center ${peers.length + 1 === 1 ? 'grid-cols-1 max-w-4xl' :
                             peers.length + 1 === 2 ? 'grid-cols-1 md:grid-cols-2' :
                                 peers.length + 1 === 3 ? 'grid-cols-1 md:grid-cols-3' :
                                     peers.length + 1 === 4 ? 'grid-cols-2' :
                                         'grid-cols-2 md:grid-cols-3 lg:grid-cols-4'
                             }`}>
                             {/* Me Participant */}
-                            <div className={`relative bg-zinc-900 rounded-2xl overflow-hidden transition-all duration-500 border-2 ${isSpeaking ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)]' : 'border-transparent'} ${isMobileDevice ? 'aspect-[9/16]' : 'aspect-video'}`}>
+                            <div className={`relative bg-zinc-900 rounded-2xl overflow-hidden transition-all duration-500 border-2 ${isSpeaking ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)]' : 'border-transparent'} aspect-video`}>
                                 <video ref={localVideoRef} autoPlay muted playsInline
                                     className={`w-full h-full object-cover transform scale-x-[-1] ${!isVideoOn ? 'hidden' : ''}`} />
                                 {!isVideoOn && (
@@ -1109,7 +1115,7 @@ const MeetingRoom = () => {
                             animate={{ x: 0 }}
                             exit={{ x: "-100%" }}
                             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                            className="fixed top-16 left-0 bottom-20 w-[450px] bg-zinc-950 border-r border-white/5 z-40 overflow-hidden flex flex-col shadow-[20px_0_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl"
+                            className="fixed top-16 left-0 bottom-24 lg:bottom-20 w-full lg:w-[450px] bg-zinc-950/98 border-r border-white/5 z-50 overflow-hidden flex flex-col shadow-[20px_0_50px_rgba(0,0,0,0.5)] backdrop-blur-3xl"
                         >
                             <div className="p-6 flex flex-col">
                                 <div className="flex items-center justify-between mb-8">
@@ -1273,41 +1279,41 @@ const MeetingRoom = () => {
             </div>
 
             {/* Footer */}
-            <footer className="h-20 flex items-center justify-between bg-black z-20 px-4">
+            <footer className="h-24 md:h-20 flex flex-col md:flex-row items-center justify-between bg-black z-20 px-2 md:px-4 py-2 md:py-0 border-t border-white/5">
                 {/* Left side info */}
-                <div className="flex items-center gap-4 w-1/4">
+                <div className="hidden md:flex items-center gap-4 w-1/4">
                     <div className="text-sm font-medium text-white pl-4">
                         {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} | {displayId || roomId}
                     </div>
                 </div>
 
                 {/* Center Controls */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 md:gap-3 justify-center w-full md:w-auto">
                     <button onClick={toggleAudio}
-                        className={`p-3 rounded-full transition-all border ${isAudioOn ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-red-500 border-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.3)]'}`}>
-                        {isAudioOn ? <Mic size={20} /> : <MicOff size={20} />}
+                        className={`p-2.5 md:p-3 rounded-full transition-all border ${isAudioOn ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-red-500 border-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.3)]'}`}>
+                        {isAudioOn ? <Mic size={18} /> : <MicOff size={18} />}
                     </button>
                     <button onClick={toggleVideo}
-                        className={`p-3 rounded-full transition-all border ${isVideoOn ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-red-500 border-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.3)]'}`}>
-                        {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
+                        className={`p-2.5 md:p-3 rounded-full transition-all border ${isVideoOn ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-red-500 border-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.3)]'}`}>
+                        {isVideoOn ? <Video size={18} /> : <VideoOff size={18} />}
                     </button>
                     <button onClick={toggleScreenSharing}
-                        className={`p-3 rounded-full transition-all border ${isScreenSharing ? 'bg-blue-500 border-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700'}`}>
-                        <Monitor size={20} />
+                        className={`p-2.5 md:p-3 rounded-full transition-all border ${isScreenSharing ? 'bg-blue-500 border-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700'}`}>
+                        <Monitor size={18} />
                     </button>
                     <button onClick={toggleHand}
-                        className={`p-3 rounded-full transition-all border ${raisedHands['me'] ? 'bg-blue-500 border-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700'}`}>
-                        <Hand size={20} />
+                        className={`p-2.5 md:p-3 rounded-full transition-all border ${raisedHands['me'] ? 'bg-blue-500 border-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700'}`}>
+                        <Hand size={18} />
                     </button>
 
                     <button onClick={toggleRecording}
-                        className={`p-3 rounded-full transition-all border ${isRecording ? 'bg-red-500 border-red-500 text-white animate-pulse' : 'bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700'}`}>
-                        {isRecording ? <StopCircle size={20} /> : <Circle size={20} />}
+                        className={`p-2.5 md:p-3 rounded-full transition-all border ${isRecording ? 'bg-red-500 border-red-500 text-white animate-pulse' : 'bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700'}`}>
+                        {isRecording ? <StopCircle size={18} /> : <Circle size={18} />}
                     </button>
 
                     <button onClick={toggleFullScreen}
-                        className={`p-3 rounded-full transition-all border ${isFullScreen ? 'bg-blue-500 border-blue-500 text-white' : 'bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700'}`}>
-                        <Maximize size={20} />
+                        className={`p-2.5 md:p-3 rounded-full transition-all border ${isFullScreen ? 'bg-blue-500 border-blue-500 text-white' : 'bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700'}`}>
+                        <Maximize size={18} />
                     </button>
 
                     <button
@@ -1317,23 +1323,23 @@ const MeetingRoom = () => {
                             if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop());
                             navigate('/dashboard');
                         }}
-                        className="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-full transition-all border border-red-500 shadow-lg shadow-red-500/20">
-                        <PhoneOff size={20} />
+                        className="bg-red-500 hover:bg-red-600 text-white px-4 md:px-6 py-2.5 md:py-3 rounded-full transition-all border border-red-500 shadow-lg shadow-red-500/20">
+                        <PhoneOff size={18} />
                     </button>
                 </div>
 
                 {/* Right side controls */}
-                <div className="flex items-center justify-end gap-2 w-1/4 pr-4">
+                <div className="flex items-center justify-center md:justify-end gap-2 w-full md:w-1/4 md:pr-4 mt-2 md:mt-0">
                     {isHost && (
                         <button onClick={finalizeMeeting} disabled={finalizing}
-                            className="bg-white text-black px-4 py-2 rounded-full font-bold text-xs hover:bg-zinc-200 transition-all disabled:opacity-50 flex items-center gap-2">
-                            {finalizing ? <Activity className="animate-spin" size={14} /> : <ShieldCheck size={14} />}
+                            className="bg-white text-black px-3 py-1.5 rounded-full font-black text-[9px] hover:bg-zinc-200 transition-all disabled:opacity-50 flex items-center gap-2">
+                            {finalizing ? <Activity className="animate-spin" size={12} /> : <ShieldCheck size={12} />}
                             <span>SEAL BINARY</span>
                         </button>
                     )}
                     <button onClick={() => setShowSidebar(!showSidebar)}
-                        className={`p-3 rounded-full transition-all ${showSidebar ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}>
-                        <Activity size={20} />
+                        className={`p-2.5 rounded-full transition-all ${showSidebar ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}>
+                        <Activity size={18} />
                     </button>
                 </div>
             </footer>

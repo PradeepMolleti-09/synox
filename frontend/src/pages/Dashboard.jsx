@@ -173,20 +173,20 @@ const Dashboard = () => {
                     </p>
                 </div>
 
-                <div className="flex flex-col xl:flex-row w-full lg:w-auto gap-4 items-stretch xl:items-center bg-zinc-900/40 p-3 rounded-2xl backdrop-blur-xl border border-white/10 focus-within:border-white/20 transition-all shadow-2xl">
+                <div className="flex flex-col sm:flex-row w-full lg:w-auto gap-4 items-stretch sm:items-center bg-zinc-900/40 p-3 rounded-2xl backdrop-blur-xl border border-white/10 focus-within:border-white/20 transition-all shadow-2xl">
                     {!isArchiveView && (
-                        <div className="flex items-center gap-2 px-4 whitespace-nowrap">
-                            <Plus size={14} className="text-gray-500" />
+                        <div className="flex flex-1 items-center gap-2 px-2 md:px-4">
+                            <Plus size={14} className="text-gray-500 shrink-0" />
                             <input
                                 value={title}
                                 onChange={(e) => setTitle(e.target.value)}
                                 placeholder="SESSION NAME..."
-                                className="bg-transparent py-3 w-40 text-xs font-black tracking-widest text-white focus:outline-none placeholder:text-gray-700 uppercase"
+                                className="bg-transparent py-3 flex-1 text-xs font-black tracking-widest text-white focus:outline-none placeholder:text-gray-700 uppercase min-w-0"
                             />
                             <button
                                 onClick={createMeeting}
                                 disabled={loading || !account}
-                                className="bg-white text-black px-6 py-2.5 rounded-xl font-black hover:bg-zinc-200 transition-all text-[10px] tracking-[0.2em] whitespace-nowrap"
+                                className="bg-white text-black px-4 md:px-6 py-2.5 rounded-xl font-black hover:bg-zinc-200 transition-all text-[10px] tracking-[0.2em] whitespace-nowrap"
                             >
                                 {loading ? <Clock className="w-4 h-4 animate-spin" /> : "NEW"}
                             </button>
@@ -295,7 +295,7 @@ const Dashboard = () => {
                         <X size={32} />
                     </button>
 
-                    <div className="w-full max-w-5xl overflow-hidden rounded-[2rem] border border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.8)] bg-zinc-950 relative flex flex-col">
+                    <div className="w-full max-w-5xl h-full md:h-auto overflow-y-auto md:overflow-hidden rounded-[1.5rem] md:rounded-[2rem] border border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.8)] bg-zinc-950 relative flex flex-col">
                         {!decrypted ? (
                             <div className="p-12 md:p-20 text-center flex flex-col items-center justify-center">
                                 <div className="w-24 h-24 bg-blue-500/10 rounded-3xl flex items-center justify-center mb-8 border border-blue-500/20 shadow-2xl relative group">
