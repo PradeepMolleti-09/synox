@@ -32,7 +32,7 @@ const ICE_SERVERS = {
 };
 
 // ─── Remote Video Component ───────────────────────────────────────────────────
-const RemoteVideo = ({ stream, peerId, name, isHandRaised, isSpeaking, isVideoOn, isScreenSharing, isMobile }) => {
+const RemoteVideo = ({ stream, peerId, name, isHandRaised, isSpeaking, isVideoOn, isAudioOn, isScreenSharing, isMobile }) => {
     const ref = useRef();
     const avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${peerId}`;
 
@@ -66,9 +66,9 @@ const RemoteVideo = ({ stream, peerId, name, isHandRaised, isSpeaking, isVideoOn
             </div>
 
             {/* Mute Indicator */}
-            {!isSpeaking && (
-                <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md p-2 rounded-full border border-white/10">
-                    <MicOff size={14} className="text-white/60" />
+            {!isAudioOn && (
+                <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md p-2 rounded-full border border-white/10 z-10">
+                    <MicOff size={14} className="text-red-500" />
                 </div>
             )}
 
@@ -98,6 +98,8 @@ const MeetingRoom = () => {
     const [huddleId, setHuddleId] = useState(null);
     const [meetingTitle, setMeetingTitle] = useState("Loading...");
     const [isHost, setIsHost] = useState(false);
+    const [hasJoined, setHasJoined] = useState(false);
+    const [lobbyLoading, setLobbyLoading] = useState(false);
     const [finalizing, setFinalizing] = useState(false);
     const [showSidebar, setShowSidebar] = useState(true);
     const [events, setEvents] = useState([]);
@@ -334,13 +336,6 @@ const MeetingRoom = () => {
 
         socket.on('connect', () => {
             addEvent("NETWORK", `Connected to signaling server.`);
-            if (isHost) {
-                socket.emit("join-room", {
-                    roomId: huddleId,
-                    isHost: true,
-                    name: account?.slice(0, 8)
-                });
-            }
         });
 
         socket.on('meeting-info', ({ meetingId }) => {
@@ -948,10 +943,18 @@ const MeetingRoom = () => {
                     </div>
                     <div className="space-y-8">
                         <div>
-                            <span className="text-blue-500 font-black text-[10px] tracking-[0.3em] uppercase mb-2 block">Protocol Authorization</span>
-                            <h1 className="text-5xl font-black tracking-tighter mb-4 leading-none uppercase">{meetingTitle}</h1>
+                            <span className="text-blue-500 font-black text-[10px] tracking-[0.3em] uppercase mb-2 block">
+                                {isHost ? "System Configuration" : "Join Request"}
+                            </span>
+                            <h1 className="text-5xl font-black tracking-tighter mb-2 leading-none uppercase">{meetingTitle}</h1>
+                            <div className="flex items-center gap-2 mb-6">
+                                <Hash size={12} className="text-blue-500" />
+                                <span className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest">Room ID: {roomId}</span>
+                            </div>
                             <p className="text-zinc-500 max-w-md font-light leading-relaxed">
-                                Ready to join? You will be registered on the Ethereum ledger and eligible for attendance reputation.
+                                {isHost
+                                    ? "Welcome back, Host. Verify your hardware configuration before initiating the secure protocol mesh."
+                                    : "Protocol authorization required. Please establish your participant alias and request entry."}
                             </p>
                         </div>
                         <div className="space-y-4">
@@ -968,9 +971,9 @@ const MeetingRoom = () => {
                                         />
                                     </div>
                                     <button onClick={handleJoinSession} disabled={lobbyLoading}
-                                        className="w-full bg-white text-black py-5 rounded-3xl font-black tracking-[0.2em] text-sm hover:bg-zinc-200 transition-all shadow-xl shadow-white/5 flex items-center justify-center gap-3 disabled:opacity-50">
+                                        className={`w-full py-5 rounded-3xl font-black tracking-[0.2em] text-sm transition-all shadow-xl flex items-center justify-center gap-3 disabled:opacity-50 ${isHost ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-500/20' : 'bg-white text-black hover:bg-zinc-200 shadow-white/5'}`}>
                                         {lobbyLoading ? <Activity className="animate-spin" /> : <ShieldCheck />}
-                                        {lobbyLoading ? "INITIALIZING..." : "ASK TO JOIN"}
+                                        {lobbyLoading ? "INITIALIZING..." : (isHost ? "LAUNCH PROTOCOL" : "ASK TO JOIN")}
                                     </button>
                                 </div>
                             ) : joinStatus === "waiting" ? (
@@ -1064,9 +1067,9 @@ const MeetingRoom = () => {
                                         You {isHost && "(Host)"}
                                     </span>
                                 </div>
-                                {!isSpeaking && (
-                                    <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md p-2 rounded-full border border-white/10">
-                                        <MicOff size={14} className="text-white/60" />
+                                {!isAudioOn && (
+                                    <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md p-2 rounded-full border border-white/10 z-10">
+                                        <MicOff size={14} className="text-red-500" />
                                     </div>
                                 )}
                                 {raisedHands['me'] && (
@@ -1088,6 +1091,7 @@ const MeetingRoom = () => {
                                         isHandRaised={raisedHands[peer.peerID]}
                                         isSpeaking={peer.status.isSpeaking}
                                         isVideoOn={peer.status.isVideoOn !== false}
+                                        isAudioOn={peer.status.isAudioOn !== false}
                                         isScreenSharing={peer.status.isScreenSharing}
                                         isMobile={peer.status.isMobile}
                                     />
@@ -1138,7 +1142,7 @@ const MeetingRoom = () => {
                                 {isHost && pendingJoiners.length > 0 && (
                                     <div className="mb-8 space-y-4">
                                         <h3 className="text-[10px] font-black tracking-widest text-blue-500 uppercase flex items-center gap-2">
-                                            <Users size={12} /> Pending Join Requests
+                                            <Users size={12} /> Incoming Protocol Requests ({pendingJoiners.length})
                                         </h3>
                                         <div className="grid gap-3">
                                             {pendingJoiners.map(request => (
