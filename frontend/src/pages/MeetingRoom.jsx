@@ -44,47 +44,59 @@ const RemoteVideo = ({ stream, peerId, name, isHandRaised, isSpeaking, isVideoOn
     }, [stream]);
 
     return (
-        <div className={`relative bg-zinc-900 rounded-2xl overflow-hidden transition-all duration-500 border-2 ${isSpeaking ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)]' : 'border-transparent'} aspect-video`}>
+        <motion.div
+            layout
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className={`relative bg-zinc-900 rounded-2xl overflow-hidden transition-all duration-500 border-2 ${isSpeaking ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)] ring-2 ring-blue-500/20' : 'border-transparent'} aspect-video group`}
+        >
             <video
                 ref={ref}
                 autoPlay
                 playsInline
                 data-peer={peerId}
-                className={`w-full h-full object-cover transform scale-x-[-1] ${!isVideoOn ? 'hidden' : ''}`}
+                className={`w-full h-full object-cover transform scale-x-[-1] transition-transform duration-700 group-hover:scale-105 ${!isVideoOn ? 'hidden' : ''}`}
             />
             {!isVideoOn && (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-800 absolute inset-0">
-                    <img src={avatarUrl} alt="Avatar" className="w-24 h-24 rounded-full border-4 border-white/5 shadow-2xl" />
+                    <img src={avatarUrl} alt="Avatar" className="w-20 h-20 md:w-24 md:h-24 rounded-full border-4 border-white/5 shadow-2xl group-hover:scale-110 transition-transform duration-500" />
                 </div>
+            )}
+
+            {/* Speaking Pulse Ring */}
+            {isSpeaking && (
+                <div className="absolute inset-0 border-2 border-blue-500 rounded-2xl animate-[pulse_1.5s_infinite] pointer-events-none" />
             )}
 
             {/* Name Label */}
-            <div className="absolute bottom-4 left-4 flex items-center gap-2 pointer-events-none">
-                <span className="bg-black/40 backdrop-blur-md px-3 py-1 rounded-lg text-xs font-medium text-white">
-                    {name || `User ${peerId.slice(0, 4)}`}
-                </span>
+            <div className="absolute bottom-3 left-3 md:bottom-4 md:left-4 flex items-center gap-2 pointer-events-none z-10">
+                <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-[10px] font-black tracking-[0.2em] text-white border border-white/10 uppercase flex items-center gap-2">
+                    {name || `NODE_${peerId.slice(0, 4)}`}
+                    {isMobile && <span className="opacity-40 text-[8px]">MOB</span>}
+                </div>
             </div>
 
-            {/* Mute Indicator */}
-            {!isAudioOn && (
-                <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md p-2 rounded-full border border-white/10 z-10">
-                    <MicOff size={14} className="text-red-500" />
-                </div>
-            )}
-
-            {isHandRaised && (
-                <div className="absolute top-4 left-4 bg-blue-500 p-2 rounded-xl shadow-lg animate-bounce z-10">
-                    <Hand size={16} className="text-white fill-white" />
-                </div>
-            )}
+            {/* Indicators */}
+            <div className="absolute top-3 right-3 md:top-4 md:right-4 flex items-center gap-2 z-10">
+                {!isAudioOn && (
+                    <div className="bg-red-500/80 backdrop-blur-md p-2 rounded-full border border-white/10 shadow-lg">
+                        <MicOff size={12} className="text-white" />
+                    </div>
+                )}
+                {isHandRaised && (
+                    <div className="bg-blue-600 p-2 rounded-xl animate-bounce shadow-lg border border-white/10">
+                        <Hand size={14} className="text-white fill-white" />
+                    </div>
+                )}
+            </div>
 
             {isScreenSharing && (
-                <div className="absolute top-4 left-16 bg-blue-500/80 backdrop-blur-md px-3 py-1 rounded-lg flex items-center gap-2">
+                <div className="absolute top-3 left-3 md:top-4 md:left-4 bg-blue-500/80 backdrop-blur-md px-3 py-1.5 rounded-lg flex items-center gap-2 z-10 border border-white/10 shadow-lg">
                     <Monitor size={12} className="text-white" />
-                    <span className="text-[10px] text-white font-bold uppercase tracking-wider">Sharing</span>
+                    <span className="text-[9px] text-white font-black uppercase tracking-widest">TRANSMITTING</span>
                 </div>
             )}
-        </div>
+        </motion.div>
     );
 };
 
@@ -998,25 +1010,26 @@ const MeetingRoom = () => {
         <div ref={meetingContainerRef} className="h-screen bg-black text-white flex flex-col font-sans overflow-hidden">
             {/* Header (Already provided by App layout usually, but here custom) */}
             {/* Header */}
-            <header className="h-16 px-6 flex items-center justify-between border-b border-white/5 z-30 glass shadow-2xl">
+            <header className="h-16 px-4 md:px-6 flex items-center justify-between border-b border-white/5 z-30 glass shadow-2xl">
                 <div className="flex items-center gap-4">
-                    <div>
+                    <div className="flex items-center gap-3">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                        <span className="text-xs font-black tracking-widest text-white uppercase hidden sm:inline-block">SYNOX PROTOCOL</span>
+                        <span className="text-white/20 hidden sm:inline-block">|</span>
                         <div className="flex gap-3 font-mono text-[10px] tracking-widest text-zinc-500 items-center">
-                            <span className="text-white font-bold">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                            <span className="text-white/20">|</span>
                             <span className="text-white font-bold uppercase">{displayId || roomId}</span>
+                            <span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 font-black">
+                                {peers.length + 1} ONLINE
+                            </span>
                             {isRecording && (
-                                <span className="flex items-center gap-1.5 text-red-500 animate-pulse font-black ml-2 px-2 py-0.5 bg-red-500/10 rounded">
+                                <span className="flex items-center gap-1.5 text-red-500 animate-pulse font-black px-2 py-0.5 bg-red-500/10 rounded">
                                     <div className="w-2 h-2 bg-red-500 rounded-full" /> REC
                                 </span>
                             )}
                         </div>
                     </div>
                 </div>
-                <button onClick={() => setShowSidebar(!showSidebar)}
-                    className={`p-2 rounded-lg border transition-all ${showSidebar ? 'bg-white/10 border-white/20' : 'bg-transparent border-white/5 hover:border-white/10'}`}>
-                    <Activity size={18} />
-                </button>
+                {/* Top right button removed as per user request (redundant with footer) */}
             </header>
 
             <div className="flex-1 flex flex-col overflow-hidden relative">
@@ -1041,30 +1054,52 @@ const MeetingRoom = () => {
                                         'grid-cols-2 md:grid-cols-3 lg:grid-cols-4'
                             }`}>
                             {/* Me Participant */}
-                            <div className={`relative bg-zinc-900 rounded-2xl overflow-hidden transition-all duration-500 border-2 ${isSpeaking ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)]' : 'border-transparent'} aspect-video`}>
+                            <motion.div
+                                layout
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className={`relative bg-zinc-900 rounded-2xl overflow-hidden transition-all duration-500 border-2 ${isLocalSpeaking ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)] ring-2 ring-blue-500/20' : 'border-transparent'} aspect-video group`}
+                            >
                                 <video ref={localVideoRef} autoPlay muted playsInline
-                                    className={`w-full h-full object-cover transform scale-x-[-1] ${!isVideoOn ? 'hidden' : ''}`} />
+                                    className={`w-full h-full object-cover transform scale-x-[-1] transition-transform duration-700 group-hover:scale-105 ${!isVideoOn ? 'hidden' : ''}`} />
                                 {!isVideoOn && (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-800">
-                                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${account}`} alt="Me" className="w-24 h-24 rounded-full border border-white/10 shadow-2xl" />
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-800 transition-all duration-500">
+                                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${account}`} alt="Me" className="w-20 h-20 md:w-24 md:h-24 rounded-full border border-white/10 shadow-2xl group-hover:scale-110 transition-transform duration-500" />
                                     </div>
                                 )}
-                                <div className="absolute bottom-4 left-4 flex items-center gap-2">
-                                    <span className="bg-black/40 backdrop-blur-md px-3 py-1 rounded-lg text-xs font-medium text-white">
-                                        You {isHost && "(Host)"}
-                                    </span>
+
+                                {/* Speaking Pulse Ring */}
+                                {isLocalSpeaking && (
+                                    <div className="absolute inset-0 border-2 border-blue-500 rounded-2xl animate-[pulse_1.5s_infinite] pointer-events-none" />
+                                )}
+
+                                <div className="absolute bottom-3 left-3 md:bottom-4 md:left-4 flex items-center gap-2 z-10">
+                                    <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-[10px] font-black tracking-[0.2em] text-white border border-white/10 uppercase flex items-center gap-2">
+                                        YOU {isHost && "(HOST)"}
+                                        {isMobile && <span className="opacity-40 text-[8px]">MOB</span>}
+                                    </div>
                                 </div>
-                                {!isAudioOn && (
-                                    <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md p-2 rounded-full border border-white/10 z-10">
-                                        <MicOff size={14} className="text-red-500" />
+
+                                <div className="absolute top-3 right-3 md:top-4 md:right-4 flex items-center gap-2 z-10">
+                                    {!isAudioOn && (
+                                        <div className="bg-red-500/80 backdrop-blur-md p-2 rounded-full border border-white/10 shadow-lg">
+                                            <MicOff size={12} className="text-white" />
+                                        </div>
+                                    )}
+                                    {raisedHands['me'] && (
+                                        <div className="bg-blue-600 p-2 rounded-xl animate-bounce shadow-lg border border-white/10">
+                                            <Hand size={14} className="text-white fill-white" />
+                                        </div>
+                                    )}
+                                </div>
+
+                                {isScreenSharing && (
+                                    <div className="absolute top-3 left-3 md:top-4 md:left-4 bg-blue-500/80 backdrop-blur-md px-3 py-1.5 rounded-lg flex items-center gap-2 z-10 border border-white/10 shadow-lg">
+                                        <Monitor size={12} className="text-white" />
+                                        <span className="text-[9px] text-white font-black uppercase tracking-widest">TRANSMITTING</span>
                                     </div>
                                 )}
-                                {raisedHands['me'] && (
-                                    <div className="absolute top-4 left-4 bg-blue-500 p-2 rounded-xl animate-bounce border border-white/20">
-                                        <Hand size={16} className="text-white fill-white" />
-                                    </div>
-                                )}
-                            </div>
+                            </motion.div>
 
                             {/* All Participants */}
                             {peers
@@ -1194,30 +1229,47 @@ const MeetingRoom = () => {
                                         <h3 className="text-[10px] font-black tracking-widest text-zinc-400 uppercase">Active Mesh Nodes ({peers.length + 1})</h3>
                                         <div className="grid gap-3">
                                             {/* Me Node */}
-                                            <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl flex items-center justify-between">
+                                            <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl flex items-center justify-between group hover:bg-blue-500/10 transition-all">
                                                 <div className="flex items-center gap-3">
-                                                    <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${account}`} className="w-8 h-8 rounded-full border border-blue-500/20" />
+                                                    <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${account}`} className="w-10 h-10 rounded-full border border-blue-500/20 shadow-lg group-hover:scale-110 transition-transform" />
                                                     <div>
-                                                        <p className="text-xs font-bold text-white">{joinName} (You)</p>
-                                                        <p className="text-[8px] text-blue-500 font-mono uppercase tracking-widest">Local Authority</p>
+                                                        <p className="text-xs font-black tracking-widest text-white uppercase">{joinName} (You)</p>
+                                                        <p className="text-[8px] text-blue-500 font-black uppercase tracking-[0.2em] mt-0.5">Local Authority</p>
                                                     </div>
                                                 </div>
-                                                <div className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
+                                                <div className="flex items-center gap-3">
+                                                    <div className="flex gap-1.5 mr-2">
+                                                        {isVideoOn ? <Video size={10} className="text-blue-400" /> : <VideoOff size={10} className="text-red-500 opacity-50" />}
+                                                        {isAudioOn ? <Mic size={10} className="text-blue-400" /> : <MicOff size={10} className="text-red-500 opacity-50" />}
+                                                        {isScreenSharing && <Monitor size={10} className="text-blue-400 animate-pulse" />}
+                                                    </div>
+                                                    <div className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
+                                                </div>
                                             </div>
 
                                             {/* Peer Nodes */}
                                             {peers.map(peer => {
                                                 const status = remoteStatus[peer.peerID] || {};
                                                 return (
-                                                    <div key={peer.peerID} className="p-4 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-between">
-                                                        <div className="flex items-center gap-4">
-                                                            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${peer.peerID}`} className="w-8 h-8 rounded-full border border-white/10" />
+                                                    <div key={peer.peerID} className="p-4 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-between group hover:bg-white/10 transition-all">
+                                                        <div className="flex items-center gap-3">
+                                                            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${peer.peerID}`} className="w-10 h-10 rounded-full border border-white/10 shadow-lg group-hover:scale-110 transition-transform" />
                                                             <div>
-                                                                <p className="text-xs font-bold text-white tracking-widest uppercase">{status.name || "UNIDENTIFIED NODE"}</p>
-                                                                <p className="text-[8px] text-zinc-500 font-mono uppercase tracking-widest">{peer.peerID.slice(0, 16)}...</p>
+                                                                <p className="text-xs font-black tracking-widest text-white uppercase">{status.name || "UNIDENTIFIED NODE"}</p>
+                                                                <div className="flex items-center gap-2 mt-0.5">
+                                                                    <p className="text-[8px] text-zinc-500 font-mono uppercase tracking-widest">{peer.peerID.slice(0, 16)}...</p>
+                                                                    {status.isMobile && <span className="bg-zinc-800 text-zinc-400 text-[8px] px-1.5 py-0.5 rounded font-black">MOBILE</span>}
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="flex gap-1.5 mr-2">
+                                                                {status.isVideoOn !== false ? <Video size={10} className="text-blue-400" /> : <VideoOff size={10} className="text-red-500 opacity-50" />}
+                                                                {status.isAudioOn !== false ? <Mic size={10} className="text-blue-400" /> : <MicOff size={10} className="text-red-500 opacity-50" />}
+                                                                {status.isScreenSharing && <Monitor size={10} className="text-blue-400 animate-pulse" />}
+                                                            </div>
+                                                            <div className={`w-2 h-2 rounded-full ${status.isSpeaking ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.6)] animate-pulse' : 'bg-zinc-700'}`} />
+                                                        </div>
                                                     </div>
                                                 );
                                             })}
@@ -1262,8 +1314,8 @@ const MeetingRoom = () => {
             <footer className="h-24 md:h-20 flex flex-col md:flex-row items-center justify-between bg-black z-20 px-2 md:px-4 py-2 md:py-0 border-t border-white/5">
                 {/* Left side info */}
                 <div className="hidden md:flex items-center gap-4 w-1/4">
-                    <div className="text-sm font-medium text-white pl-4">
-                        {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} | {displayId || roomId}
+                    <div className="text-sm font-black tracking-widest text-zinc-500 pl-4 uppercase">
+                        {displayId || roomId}
                     </div>
                 </div>
 
