@@ -105,9 +105,14 @@ const MeetingRoom = () => {
     const [isRecording, setIsRecording] = useState(false);
     const [displayId, setDisplayId] = useState("");
     const [cid, setCid] = useState("NOT_FINALIZED");
-    const [hasJoined, setHasJoined] = useState(false);
-    const [lobbyLoading, setLobbyLoading] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [meetingIdShort, setMeetingIdShort] = useState("");
+    const [pendingJoiners, setPendingJoiners] = useState([]); // [{ peerId, name }]
+    const [joinStatus, setJoinStatus] = useState("idle"); // idle, waiting, granted, denied
+    const [joinName, setJoinName] = useState(() => {
+        const params = new URLSearchParams(window.location.search);
+        return params.get("name") || account?.slice(0, 8) || "";
+    });
 
     // Media State
     const [isVideoOn, setIsVideoOn] = useState(true);
@@ -128,7 +133,20 @@ const MeetingRoom = () => {
     // Full Screen State
     const [isFullScreen, setIsFullScreen] = useState(false);
     const [showInfo, setShowInfo] = useState(false);
+    const [isWindowFocused, setIsWindowFocused] = useState(true);
     const meetingContainerRef = useRef(null);
+
+    // Secure Mode: Detect Focus for "Blocking" recording
+    useEffect(() => {
+        const handleBlur = () => setIsWindowFocused(false);
+        const handleFocus = () => setIsWindowFocused(true);
+        window.addEventListener('blur', handleBlur);
+        window.addEventListener('focus', handleFocus);
+        return () => {
+            window.removeEventListener('blur', handleBlur);
+            window.removeEventListener('focus', handleFocus);
+        };
+    }, []);
 
     // Refs
     const socketRef = useRef(null);
@@ -151,12 +169,30 @@ const MeetingRoom = () => {
 
         const fetchMeeting = async () => {
             try {
-                const m = await contract.meetings(roomId);
-                setHuddleId(m.huddleId);
-                setMeetingTitle(m.title);
-                setIsHost(m.host.toLowerCase() === account?.toLowerCase());
-                setDisplayId(Math.floor(100 + Math.random() * 900).toString());
-                if (m.recordingCID && m.recordingCID !== "") setCid(m.recordingCID);
+                let m;
+                // If the roomId is numeric, we can fetch directly
+                if (!isNaN(roomId)) {
+                    m = await contract.meetings(roomId);
+                } else {
+                    // Discovery Search: RoomId is alphanumeric, search all meetings
+                    const count = await contract.meetingCount();
+                    for (let i = 0; i < count; i++) {
+                        const temp = await contract.meetings(i);
+                        if (temp.huddleId === roomId) {
+                            m = temp;
+                            break;
+                        }
+                    }
+                }
+
+                if (m) {
+                    setHuddleId(m.huddleId);
+                    setMeetingTitle(m.title);
+                    setIsHost(m.host.toLowerCase() === account?.toLowerCase());
+                    if (m.recordingCID && m.recordingCID !== "") setCid(m.recordingCID);
+                } else {
+                    showToast("Security Alert: Meeting room not found on Ethereum.", "error");
+                }
             } catch (e) {
                 console.warn("Meeting fetch failed", e);
             }
@@ -204,24 +240,20 @@ const MeetingRoom = () => {
     }, [localStream, hasJoined]);
 
     // ── Join Session ──────────────────────────────────────────────────────────
-    const handleJoinSession = async () => {
-        if (!signer || !provider) return;
+    const handleJoinSession = useCallback(async () => {
+        if (!huddleId || !account || !socketRef.current) return;
         setLobbyLoading(true);
-        try {
-            const contract = new ethers.Contract(SYNOX_ADDRESS, SYNOX_ABI, signer);
-            const isPart = await contract.isParticipant(roomId, account);
-            if (!isPart) {
-                const tx = await contract.joinMeeting(roomId);
-                await tx.wait();
-            }
-            setHasJoined(true);
-            addEvent("NETWORK", "Blockchain authorization complete. Joining P2P mesh...");
-        } catch (e) {
-            console.error(e);
-            showToast("Authorization Error: " + e.message, "error");
-        }
-        setLobbyLoading(false);
-    };
+
+        // Emit join-room event with host status and name
+        socketRef.current.emit("join-room", {
+            roomId: huddleId,
+            isHost,
+            name: joinName || account?.slice(0, 8)
+        });
+
+        addEvent("SECURITY", "Initiating protocol handshake...");
+        // Status will be updated by socket listeners 'waiting-for-permission' or 'meeting-info'
+    }, [huddleId, account, isHost, socketRef, setLobbyLoading, joinName, addEvent]);
 
     // ── RTCPeerConnection factory ─────────────────────────────────────────────
     const removePeer = useCallback((peerID) => {
@@ -288,154 +320,176 @@ const MeetingRoom = () => {
     }, [removePeer]);
 
     // ── WebRTC + Socket Setup ─────────────────────────────────────────────────
+    // ── Socket Connection ────────────────────────────────────────────────────
     useEffect(() => {
-        if (!hasJoined || !huddleId) return;
+        if (!huddleId || !account) return;
 
-        // Wait for media to be ready before connecting
-        const connect = async () => {
-            // Give media up to 3 seconds to initialize
-            if (!localStreamRef.current) {
-                await new Promise(resolve => {
-                    const check = setInterval(() => {
-                        if (localStreamRef.current) { clearInterval(check); resolve(); }
-                    }, 100);
-                    setTimeout(() => { clearInterval(check); resolve(); }, 3000);
+        const socket = io(SIGNALING_SERVER, {
+            transports: ['websocket', 'polling'],
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+        });
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+            addEvent("NETWORK", `Connected to signaling server.`);
+            if (isHost) {
+                socket.emit("join-room", {
+                    roomId: huddleId,
+                    isHost: true,
+                    name: account?.slice(0, 8)
                 });
             }
+        });
 
-            const socket = io(SIGNALING_SERVER, {
-                transports: ['websocket', 'polling'],
-                reconnectionAttempts: 10,
-                reconnectionDelay: 1000,
-                reconnectionDelayMax: 5000,
+        socket.on('meeting-info', ({ meetingId }) => {
+            setMeetingIdShort(meetingId);
+            setJoinStatus("granted");
+            setHasJoined(true);
+            setLobbyLoading(false);
+            addEvent("SUCCESS", "Channel established. Entering mesh...");
+        });
+
+        socket.on('waiting-for-permission', ({ meetingId }) => {
+            setMeetingIdShort(meetingId);
+            setJoinStatus("waiting");
+            setLobbyLoading(false);
+            addEvent("SECURITY", "Join request submitted. Awaiting host confirmation.");
+        });
+
+        socket.on('permission-granted', () => {
+            setJoinStatus("granted");
+            setHasJoined(true);
+            addEvent("SUCCESS", "Host granted entry. Initializing WebRTC...");
+        });
+
+        socket.on('permission-denied', () => {
+            setJoinStatus("denied");
+            showToast("Host denied your entry request.", "error");
+        });
+
+        socket.on('permission-requested', ({ peerId, name }) => {
+            setPendingJoiners(prev => {
+                if (prev.find(p => p.peerId === peerId)) return prev;
+                return [...prev, { peerId, name }];
             });
-            socketRef.current = socket;
+            showToast(`Protocol Request: ${name} is knocking.`, "info");
+        });
 
-            socket.on('connect', () => {
-                addEvent("NETWORK", `Connected to signaling server.`);
-                // Robustness: ensure listeners are active before joining
-                setTimeout(() => {
-                    socket.emit("join-room", huddleId, { isMobile: isMobileDevice });
-                }, 500);
-            });
+        return () => {
+            socket.disconnect();
+        };
+    }, [huddleId, account, isHost, addEvent, showToast]);
 
-            // On reconnect: close all stale PCs, clear peer list, rejoin
-            socket.on('reconnect', () => {
-                addEvent("NETWORK", "Reconnected. Re-establishing peer connections...");
-                Object.values(pcsRef.current).forEach(pc => pc.close());
-                pcsRef.current = {};
-                setPeers([]);
-                socket.emit("join-room", huddleId);
-            });
+    // ── WebRTC Mesh Logic ─────────────────────────────────────────────────────
+    useEffect(() => {
+        const socket = socketRef.current;
+        if (!hasJoined || !socket || !huddleId) return;
 
-            // ── Joiner receives existing users → initiates offers ──
-            socket.on("all-users", async (users) => {
-                addEvent("NETWORK", `${users.length} peer(s) in room. Establishing connections...`);
+        socket.on('reconnect', () => {
+            addEvent("NETWORK", "Mesh re-synching. Regenerating peers...");
+            Object.values(pcsRef.current).forEach(pc => pc.close());
+            pcsRef.current = {};
+            setPeers([]);
+            socket.emit("join-room", { roomId: huddleId, isHost, name: account?.slice(0, 8) });
+        });
 
-                for (const userID of users) {
-                    // Close stale PC if exists before creating new one
-                    if (pcsRef.current[userID]) {
-                        pcsRef.current[userID].close();
-                        delete pcsRef.current[userID];
-                    }
+        // ── Joiner receives existing users → initiates offers ──
+        socket.on("all-users", (users) => {
+            addEvent("NETWORK", `${users.length} peer(s) in room. Establishing connections...`);
+            users.forEach(async (user) => {
+                const peerID = user.id;
+                setRemoteStatus(prev => ({ ...prev, [peerID]: { ...prev[peerID], name: user.name } }));
 
-                    const pc = createPC(userID, socket);
-                    pcsRef.current[userID] = pc;
-
-                    setPeers(prev => {
-                        const filtered = prev.filter(p => p.peerID !== userID);
-                        return [...filtered, { peerID: userID, pc, stream: null, addedAt: Date.now() }];
-                    });
-
-                    try {
-                        const offer = await pc.createOffer();
-                        await pc.setLocalDescription(offer);
-                        socket.emit("offer", { target: userID, callerID: socket.id, signal: offer });
-                    } catch (e) {
-                        console.error("Error creating offer:", e);
-                    }
-                }
-            });
-
-            // ── Existing user notified of new joiner (just log; wait for offer) ──
-            socket.on("user-joined", (userID) => {
-                addEvent("NETWORK", `New peer joined: ${userID.slice(0, 8)}...`);
-            });
-
-            // ── Receive offer → send answer ──
-            socket.on("offer", async (payload) => {
-                const { callerID, signal } = payload;
-
-                // Always create fresh PC for incoming offer (handles reconnect)
-                if (pcsRef.current[callerID]) {
-                    pcsRef.current[callerID].close();
-                    delete pcsRef.current[callerID];
+                if (pcsRef.current[peerID]) {
+                    pcsRef.current[peerID].close();
+                    delete pcsRef.current[peerID];
                 }
 
-                const pc = createPC(callerID, socket);
-                pcsRef.current[callerID] = pc;
+                const pc = createPC(peerID, socket);
+                pcsRef.current[peerID] = pc;
+
                 setPeers(prev => {
-                    const filtered = prev.filter(p => p.peerID !== callerID);
-                    return [...filtered, { peerID: callerID, pc, stream: null, addedAt: Date.now() }];
+                    const filtered = prev.filter(p => p.peerID !== peerID);
+                    return [...filtered, { peerID: peerID, pc, stream: null, addedAt: Date.now() }];
                 });
 
                 try {
-                    await pc.setRemoteDescription(new RTCSessionDescription(signal));
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    socket.emit("answer", { signal: answer, target: callerID, id: socket.id });
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    socket.emit("offer", { target: peerID, callerID: socket.id, signal: offer });
                 } catch (e) {
-                    console.error("Error handling offer:", e);
+                    console.error("Error creating offer:", e);
                 }
             });
+        });
 
-            // ── Receive answer ──
-            socket.on("answer", async (payload) => {
-                const pc = pcsRef.current[payload.id];
-                if (pc) {
-                    try {
-                        await pc.setRemoteDescription(new RTCSessionDescription(payload.signal));
-                    } catch (e) {
-                        console.error("Error handling answer:", e);
-                    }
+        // ── Existing user notified of new joiner ──
+        socket.on("user-joined", ({ id, name }) => {
+            addEvent("NETWORK", `Peer join: ${name}`);
+            setRemoteStatus(prev => ({ ...prev, [id]: { ...prev[id], name: name } }));
+        });
+
+        // ── Receive offer → send answer ──
+        socket.on("offer", async (payload) => {
+            const { callerID, signal } = payload;
+            if (pcsRef.current[callerID]) {
+                pcsRef.current[callerID].close();
+                delete pcsRef.current[callerID];
+            }
+
+            const pc = createPC(callerID, socket);
+            pcsRef.current[callerID] = pc;
+            setPeers(prev => {
+                const filtered = prev.filter(p => p.peerID !== callerID);
+                return [...filtered, { peerID: callerID, pc, stream: null, addedAt: Date.now() }];
+            });
+
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription(signal));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                socket.emit("answer", { signal: answer, target: callerID, id: socket.id });
+            } catch (e) {
+                console.error("Error handling offer:", e);
+            }
+        });
+
+        socket.on("answer", async (payload) => {
+            const pc = pcsRef.current[payload.id];
+            if (pc) {
+                try {
+                    await pc.setRemoteDescription(new RTCSessionDescription(payload.signal));
+                } catch (e) {
+                    console.error("Error handling answer:", e);
                 }
-            });
+            }
+        });
 
-            // ── Receive ICE candidate ──
-            socket.on("ice-candidate", async ({ from, candidate }) => {
-                const pc = pcsRef.current[from];
-                if (pc && candidate) {
-                    try {
-                        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                    } catch (e) {
-                        console.warn("Error adding ICE candidate:", e);
-                    }
+        socket.on("ice-candidate", async ({ from, candidate }) => {
+            const pc = pcsRef.current[from];
+            if (pc && candidate) {
+                try {
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch (e) {
+                    console.warn("Error adding ICE candidate:", e);
                 }
-            });
+            }
+        });
 
-            // ── User left ──
-            socket.on("user-left", (userID) => {
-                addEvent("NETWORK", `Peer disconnected: ${userID.slice(0, 8)}...`);
-                removePeer(userID);
-            });
+        socket.on("user-left", (userID) => {
+            addEvent("NETWORK", `Peer detach.`);
+            removePeer(userID);
+        });
 
-            socket.on('disconnect', () => {
-                addEvent("NETWORK", "Disconnected from signaling server.");
-            });
-        };
-
-        connect();
-
-        // ── Ghost peer sweeper: remove peers with no stream after 10s ──
         const ghostSweeper = setInterval(() => {
             setPeers(prev => {
                 const now = Date.now();
                 const alive = prev.filter(p => {
-                    if (p.stream) return true; // has stream, keep
-                    if (!p.addedAt) return true; // no timestamp yet, keep
-                    if (now - p.addedAt > 10000) {
-                        // No stream after 10s → ghost, remove
-                        console.warn(`[Ghost sweep] Removing peer ${p.peerID.slice(0, 8)} (no stream after 10s)`);
+                    if (p.stream) return true;
+                    if (!p.addedAt) return true;
+                    if (now - p.addedAt > 15000) {
                         if (pcsRef.current[p.peerID]) {
                             pcsRef.current[p.peerID].close();
                             delete pcsRef.current[p.peerID];
@@ -450,19 +504,25 @@ const MeetingRoom = () => {
 
         return () => {
             clearInterval(ghostSweeper);
-            if (socketRef.current) socketRef.current.disconnect();
+            socket.off("all-users");
+            socket.off("user-joined");
+            socket.off("offer");
+            socket.off("answer");
+            socket.off("ice-candidate");
+            socket.off("user-left");
+            socket.off("reconnect");
             Object.values(pcsRef.current).forEach(pc => pc.close());
             pcsRef.current = {};
             setPeers([]);
         };
-    }, [hasJoined, huddleId, removePeer]);
+    }, [hasJoined, huddleId, removePeer, addEvent]);
 
     // ── Data channel for status/hand (via socket relay) ──────────────────────
     const broadcastStatus = useCallback((payload) => {
         if (socketRef.current) {
             socketRef.current.emit('broadcast-status', {
                 roomId: huddleId,
-                payload: { ...payload, isMobile: isMobileDevice, name: account?.slice(0, 8) }
+                payload: { ...payload, isMobile: isMobileDevice, name: joinName || account?.slice(0, 8) }
             });
         }
     }, [huddleId, isMobileDevice, account]);
@@ -895,11 +955,36 @@ const MeetingRoom = () => {
                             </p>
                         </div>
                         <div className="space-y-4">
-                            <button onClick={handleJoinSession} disabled={lobbyLoading}
-                                className="w-full bg-white text-black py-5 rounded-3xl font-black tracking-[0.2em] text-sm hover:bg-zinc-200 transition-all shadow-xl shadow-white/5 flex items-center justify-center gap-3 disabled:opacity-50">
-                                {lobbyLoading ? <Activity className="animate-spin" /> : <ShieldCheck />}
-                                {lobbyLoading ? "AUTHORIZING..." : "JOIN SESSION"}
-                            </button>
+                            {joinStatus === "idle" ? (
+                                <div className="space-y-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black tracking-widest text-zinc-500 uppercase">Participant Alias</label>
+                                        <input
+                                            type="text"
+                                            value={joinName}
+                                            onChange={(e) => setJoinName(e.target.value)}
+                                            placeholder="Enter your name..."
+                                            className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm font-bold focus:border-blue-500 transition-all outline-none text-white tracking-widest uppercase"
+                                        />
+                                    </div>
+                                    <button onClick={handleJoinSession} disabled={lobbyLoading}
+                                        className="w-full bg-white text-black py-5 rounded-3xl font-black tracking-[0.2em] text-sm hover:bg-zinc-200 transition-all shadow-xl shadow-white/5 flex items-center justify-center gap-3 disabled:opacity-50">
+                                        {lobbyLoading ? <Activity className="animate-spin" /> : <ShieldCheck />}
+                                        {lobbyLoading ? "INITIALIZING..." : "ASK TO JOIN"}
+                                    </button>
+                                </div>
+                            ) : joinStatus === "waiting" ? (
+                                <div className="p-6 bg-blue-500/10 border border-blue-500/20 rounded-3xl text-center">
+                                    <Activity className="animate-spin text-blue-500 mx-auto mb-4" />
+                                    <p className="text-blue-500 font-black text-xs uppercase tracking-widest">Waiting for host permission...</p>
+                                </div>
+                            ) : joinStatus === "denied" ? (
+                                <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl text-center">
+                                    <X className="text-red-500 mx-auto mb-4" />
+                                    <p className="text-red-500 font-black text-xs uppercase tracking-widest">Access Denied by Host</p>
+                                </div>
+                            ) : null}
+
                             <button onClick={() => navigate('/dashboard')}
                                 className="w-full bg-zinc-900 text-zinc-400 py-4 rounded-3xl font-bold tracking-widest text-xs hover:bg-zinc-800 transition-all">
                                 CANCEL
@@ -907,7 +992,7 @@ const MeetingRoom = () => {
                         </div>
                         <div className="p-4 border border-white/5 rounded-2xl bg-white/[0.02]">
                             <p className="text-[9px] font-mono text-zinc-600 uppercase tracking-widest leading-relaxed">
-                                SECURE NOTE: BY JOINING, YOU AUTHORIZE THE SyNox09 SMART CONTRACT ({SYNOX_ADDRESS.slice(0, 8)}...) TO RECORD YOUR ATTENDANCE.
+                                SECURE NOTE: BY JOINING, YOU AUTHORIZE THE SYNOX09 SMART CONTRACT ({SYNOX_ADDRESS.slice(0, 8)}...) TO RECORD YOUR ATTENDANCE.
                             </p>
                         </div>
                     </div>
@@ -946,7 +1031,18 @@ const MeetingRoom = () => {
 
             <div className="flex-1 flex flex-col overflow-hidden relative">
                 {/* Video Grid - Full Width Immersive */}
-                <main className="flex-1 overflow-hidden bg-black flex flex-col relative w-full px-4 py-4">
+                <main className={`flex-1 overflow-hidden bg-black flex flex-col relative w-full transition-all duration-500 ease-in-out px-4 py-4 ${showSidebar ? 'ml-[450px]' : 'ml-0'}`}>
+                    {/* Secure Overlay */}
+                    {!isWindowFocused && (
+                        <div className="fixed inset-0 z-[200] bg-zinc-950/95 backdrop-blur-3xl flex flex-col items-center justify-center text-center p-12">
+                            <ShieldCheck className="text-blue-500 mb-8 w-24 h-24 animate-pulse" />
+                            <h2 className="text-4xl font-black tracking-tighter uppercase mb-4">Secure Channel Protected</h2>
+                            <p className="text-zinc-500 max-w-md font-light leading-relaxed">
+                                System-level recording detected. SYNOX Protocol has obscured the session to prevent unauthorized binary capture. Use the internal recording tool for certified transcripts.
+                            </p>
+                        </div>
+                    )}
+
                     <div className="flex-1 overflow-hidden flex items-center justify-center">
                         <div className={`grid gap-4 w-full h-full max-w-7xl mx-auto content-center ${peers.length + 1 === 1 ? 'grid-cols-1 max-w-4xl' :
                             peers.length + 1 === 2 ? 'grid-cols-1 md:grid-cols-2' :
@@ -1000,71 +1096,117 @@ const MeetingRoom = () => {
                     </div>
                 </main>
 
-                {/* Protocol Ledge - Mobile UI Nav Style Sheet */}
+                {/* Left Side Ledge (Sidebar) */}
                 <AnimatePresence>
                     {showSidebar && (
-                        <>
-                            <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                onClick={() => setShowSidebar(false)}
-                                className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100]"
-                            />
-                            <motion.aside
-                                initial={{ y: "100%" }}
-                                animate={{ y: 0 }}
-                                exit={{ y: "100%" }}
-                                transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                                className="fixed bottom-0 left-1/2 -translate-x-1/2 w-[98%] max-w-3xl max-h-[70vh] glass-card rounded-t-[2.5rem] border-x border-t border-white/10 z-[110] overflow-hidden flex flex-col shadow-[0_-20px_50px_rgba(0,0,0,0.5)]"
-                            >
-                                <div className="p-2 flex flex-col items-center">
-                                    <div className="w-12 h-1 bg-white/20 rounded-full mb-4 mt-2" />
-                                    <div className="w-full flex items-center justify-between px-6 mb-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
-                                            <span className="text-[10px] font-black tracking-[0.3em] uppercase opacity-50">Protocol Ledger Shell</span>
-                                        </div>
-                                        <button onClick={() => setShowSidebar(false)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-all">
-                                            <X size={18} />
-                                        </button>
+                        <motion.aside
+                            initial={{ x: "-100%" }}
+                            animate={{ x: 0 }}
+                            exit={{ x: "-100%" }}
+                            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                            className="fixed top-16 left-0 bottom-20 w-[450px] bg-zinc-950 border-r border-white/5 z-40 overflow-hidden flex flex-col shadow-[20px_0_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl"
+                        >
+                            <div className="p-6 flex flex-col">
+                                <div className="flex items-center justify-between mb-8">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                                        <span className="text-xs font-black tracking-[0.3em] uppercase opacity-50 text-white">Protocol Ledger</span>
                                     </div>
-
-                                    {/* Mobile Nav Style Tabs inside Ledge */}
-                                    <div className="w-[90%] bg-white/5 rounded-2xl p-1 mb-6 flex gap-1 border border-white/5">
-                                        <button className="flex-1 py-2 rounded-xl bg-white text-black font-black text-[9px] tracking-widest uppercase">Events</button>
-                                        <button className="flex-1 py-2 rounded-xl text-zinc-500 font-bold text-[9px] tracking-widest uppercase hover:text-white transition-colors">Nodes</button>
-                                        <button className="flex-1 py-2 rounded-xl text-zinc-500 font-bold text-[9px] tracking-widest uppercase hover:text-white transition-colors">Blocks</button>
-                                    </div>
+                                    <button onClick={() => setShowSidebar(false)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-all">
+                                        <X size={18} />
+                                    </button>
                                 </div>
 
-                                <div className="flex-1 overflow-y-auto px-6 pb-8 space-y-3 custom-scrollbar">
-                                    {events.map(e => (
-                                        <motion.div
-                                            initial={{ opacity: 0, x: -10 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            key={e.id}
-                                            className="p-4 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-all group"
-                                        >
-                                            <div className="flex justify-between items-center mb-2">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={`w-1 h-1 rounded-full ${e.type === 'BLOCKCHAIN' ? 'bg-blue-500' : 'bg-green-500'}`} />
-                                                    <span className="text-[8px] font-black tracking-widest text-zinc-500 uppercase">{e.type}</span>
-                                                </div>
-                                                <span className="text-[8px] font-mono text-zinc-600 group-hover:text-blue-500 transition-colors uppercase">{e.time}</span>
-                                            </div>
-                                            <p className="text-[11px] text-zinc-400 font-medium leading-relaxed tracking-tight group-hover:text-zinc-200 transition-colors">{e.msg}</p>
-                                        </motion.div>
-                                    ))}
-                                    {events.length === 0 && (
-                                        <div className="py-20 flex flex-col items-center opacity-20">
-                                            <Activity className="animate-spin mb-4" />
-                                            <p className="text-[10px] font-mono uppercase tracking-[0.3em]">Synching with blockchain...</p>
-                                        </div>
+                                <div className="bg-white/5 rounded-2xl p-1 mb-8 flex gap-1 border border-white/5 shadow-inner">
+                                    <button className="flex-1 py-3 rounded-xl bg-white text-black font-black text-[10px] tracking-widest uppercase">Events</button>
+                                    <button className="flex-1 py-3 rounded-xl text-zinc-500 font-bold text-[10px] tracking-widest uppercase hover:text-white transition-colors">Nodes</button>
+                                    {isHost && (
+                                        <button className="flex-1 py-3 rounded-xl text-zinc-500 font-bold text-[10px] tracking-widest uppercase hover:text-white transition-colors relative">
+                                            Requests
+                                            {pendingJoiners.length > 0 && (
+                                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 text-white text-[8px] flex items-center justify-center rounded-full animate-bounce">
+                                                    {pendingJoiners.length}
+                                                </span>
+                                            )}
+                                        </button>
                                     )}
                                 </div>
-                            </motion.aside>
-                        </>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto px-6 pb-8 space-y-4 custom-scrollbar">
+                                {/* Join Requests Section for Host */}
+                                {isHost && pendingJoiners.length > 0 && (
+                                    <div className="mb-8 space-y-4">
+                                        <h3 className="text-[10px] font-black tracking-widest text-blue-500 uppercase flex items-center gap-2">
+                                            <Users size={12} /> Pending Join Requests
+                                        </h3>
+                                        <div className="grid gap-3">
+                                            {pendingJoiners.map(request => (
+                                                <motion.div
+                                                    layout
+                                                    initial={{ opacity: 0, y: 10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    key={request.peerId}
+                                                    className="p-4 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-between"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${request.peerId}`} className="w-8 h-8 rounded-full border border-white/10" />
+                                                        <div>
+                                                            <p className="text-xs font-bold text-white">{request.name}</p>
+                                                            <p className="text-[9px] text-zinc-500 font-mono uppercase tracking-widest">Wants to join</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => {
+                                                                socketRef.current.emit("give-permission", { peerId: request.peerId, roomId: huddleId, approved: true });
+                                                                setPendingJoiners(prev => prev.filter(p => p.peerId !== request.peerId));
+                                                            }}
+                                                            className="p-2 bg-blue-500/20 hover:bg-blue-500 text-blue-500 hover:text-white rounded-xl transition-all"
+                                                        >
+                                                            <ShieldCheck size={16} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => {
+                                                                socketRef.current.emit("give-permission", { peerId: request.peerId, roomId: huddleId, approved: false });
+                                                                setPendingJoiners(prev => prev.filter(p => p.peerId !== request.peerId));
+                                                            }}
+                                                            className="p-2 bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-white rounded-xl transition-all"
+                                                        >
+                                                            <X size={16} />
+                                                        </button>
+                                                    </div>
+                                                </motion.div>
+                                            ))}
+                                        </div>
+                                        <hr className="border-white/5 my-6" />
+                                    </div>
+                                )}
+                                {events.map(e => (
+                                    <motion.div
+                                        initial={{ opacity: 0, x: -20 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        key={e.id}
+                                        className="p-5 bg-white/[0.02] rounded-[2rem] border border-white/5 hover:border-blue-500/20 hover:bg-white/[0.04] transition-all group"
+                                    >
+                                        <div className="flex justify-between items-center mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <div className={`w-1.5 h-1.5 rounded-full ${e.type === 'BLOCKCHAIN' ? 'bg-blue-500' : e.type === 'ERROR' ? 'bg-red-500' : 'bg-green-500'}`} />
+                                                <span className="text-[9px] font-black tracking-widest text-zinc-500 uppercase">{e.type}</span>
+                                            </div>
+                                            <span className="text-[9px] font-mono text-zinc-600 group-hover:text-blue-500 transition-colors uppercase">{e.time}</span>
+                                        </div>
+                                        <p className="text-[12px] text-zinc-400 font-medium leading-relaxed tracking-tight group-hover:text-zinc-200 transition-colors">{e.msg}</p>
+                                    </motion.div>
+                                ))}
+                                {events.length === 0 && (
+                                    <div className="py-20 flex flex-col items-center opacity-20">
+                                        <Activity className="animate-spin mb-4 w-8 h-8" />
+                                        <p className="text-xs font-mono uppercase tracking-[0.3em] text-white">Synchronizing Binary Logs...</p>
+                                    </div>
+                                )}
+                            </div>
+                        </motion.aside>
                     )}
                 </AnimatePresence>
             </div>
@@ -1100,6 +1242,11 @@ const MeetingRoom = () => {
                     <button onClick={toggleRecording}
                         className={`p-3 rounded-full transition-all border ${isRecording ? 'bg-red-500 border-red-500 text-white animate-pulse' : 'bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700'}`}>
                         {isRecording ? <StopCircle size={20} /> : <Circle size={20} />}
+                    </button>
+
+                    <button onClick={toggleFullScreen}
+                        className={`p-3 rounded-full transition-all border ${isFullScreen ? 'bg-blue-500 border-blue-500 text-white' : 'bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700'}`}>
+                        <Maximize size={20} />
                     </button>
 
                     <button

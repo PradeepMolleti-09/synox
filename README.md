@@ -1,141 +1,96 @@
-# SYNOX - Decentralized Governance & Meeting Protocol
+# SYNOX09 - Decentralized Governance & Secure Meeting Protocol
 
-![Version](https://img.shields.io/badge/version-1.0.42-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 ![Network](https://img.shields.io/badge/network-Sepolia-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-**SYNOX** is a cutting-edge decentralized application (dApp) that combines **secure video conferencing** with **blockchain-verified governance**. Built on Ethereum, it provides a tamper-proof record of meetings and automatically issues **Attendance NFTs** to participants, enabling a reputation-based DAO system.
+**SYNOX09** is a premium decentralized governance and communication protocol. It combines **cryptographically-secure video conferencing** with **on-chain reputation management**. Built on Ethereum, it provides a tamper-proof record of meetings, decentralized storage for recordings, and a DAO-ready reputation system powered by Attendance NFTs.
 
 ---
 
 ## 🌟 Key Features
 
-### 🔒 Secure & Private Meetings
-- **Peer-to-Peer Video**: Direct browser-to-browser connection using WebRTC (no central server recording).
-- **AES-256 Encryption**: Meeting metadata is encrypted before storage.
-- **IPFS Integration**: Decentralized storage for meeting records.
+### 🔒 Permission-Based Secure Meetings
+- **Secure Lobby**: Integrated "Knock" system where the host must approve participants before they join the mesh.
+- **Unique Alphanumeric IDs**: Short, memorable meeting IDs (e.g., `abc-defgh-ijk`) for easy sharing.
+- **Peer-to-Peer Video**: Direct browser-to-browser connection using WebRTC via a custom Mesh network.
+- **Live Ledger**: A persistent sidebar "Protocol Ledger" tracking every join/leave and security event in real-time.
 
-### 🏛️ DAO Governance System
-- **Proof of Attendance**: Participants earn ERC-721 NFTs for attending meetings.
-- **Reputation Scoring**: User influence grows with participation.
-- **On-Chain Voting**: Create and vote on governance proposals using reputation.
+### 🏛️ DAO & Reputation
+- **Proof of Attendance**: Participants earn ERC-721 NFTs for attending verified sessions.
+- **Dynamic Leaderboard**: Global reputation rankings based on meeting attendance and contribution.
+- **On-Chain Governance**: Propose and vote on DAO initiatives using your accumulated reputation.
 
-### 🔗 Blockchain Verification
-- **Immutable Records**: Every meeting is permanently recorded on the Ethereum Sepolia testnet.
-- **Cryptographic Proof**: Meeting data is hashed and stored on-chain for independent verification.
-- **Wallet Authentication**: Secure login using MetaMask (no passwords).
+### 🔗 Blockchain Trust
+- **Ethereum Verification**: All meeting metadata is anchored to the Sepolia testnet.
+- **CID Verification**: Built-in tool to verify IPFS recording hashes against the on-chain record.
+- **Wallet Auth**: Seamless authentication using ECDSA signatures (Metamask/Signer).
 
 ---
 
 ## 🛠️ Technology Stack
 
-- **Frontend**: React 19, Vite, Tailwind CSS, Framer Motion
-- **Blockchain**: Solidity (Smart Contracts), Hardhat, Ethers.js
-- **Video/Audio**: WebRTC (Simple-Peer), Socket.io (Signaling)
-- **Storage**: IPFS (Pinata)
+- **Frontend**: React 19, Vite, Tailwind CSS, Framer Motion, GSAP
+- **Web3**: Ethers.js, Hardhat, Solidity
+- **P2P Communication**: Simple-Peer (WebRTC), Socket.io (Signaling)
+- **Decentralized Storage**: IPFS (via Pinata)
 - **Network**: Ethereum Sepolia Testnet
-
----
-
-## 📡 Deployed Smart Contracts (Sepolia)
-
-| Contract | Address | Explorer |
-|----------|---------|----------|
-| **SyNox Core** | `0x29f4145fFfd81E8e72c813AFd133B4C38106E4d7` | [Etherscan](https://sepolia.etherscan.io/address/0x29f4145fFfd81E8e72c813AFd133B4C38106E4d7) |
-| **SyNoxNFT** | `0xDF80d2c1bBb114a526aF5bE22E30db9Bbe31363B` | [Etherscan](https://sepolia.etherscan.io/address/0xDF80d2c1bBb114a526aF5bE22E30db9Bbe31363B) |
 
 ---
 
 ## 🚀 Installation & Setup
 
-Follow these steps to run the complete project locally.
-
 ### Prerequisites
 - Node.js (v18+)
-- MetaMask Browser Extension
-- Sepolia Testnet ETH (Get from [Sepolia Faucet](https://sepoliafaucet.com/))
+- MetaMask (Sepolia Network)
+- A Pinata/IPFS API Key (optional for recording features)
 
-### 1. Clone the Repository
+### 1. Clone & Install
 ```bash
 git clone <repository-url>
 cd SYNOX
+npm install
 ```
 
-### 2. Setup Signaling Server (Required for Video)
-The signaling server helps peers find each other.
+### 2. Start Signaling Server
+The signaling server facilitates the P2P handshake.
 ```bash
 cd signaling
 npm install
 node server.js
 ```
-*Keep this terminal running.*
 
-### 3. Setup Frontend Application
-Open a **new terminal** window/tab.
+### 3. Launch Frontend
+Open a new window:
 ```bash
 cd frontend
 npm install
+npm run dev
 ```
 
 ### 4. Configure Environment
-Create a `.env` file in the `frontend` directory:
-```bash
-cp .env.example .env
-```
-Ensure it contains the correct contract addresses (already pre-filled in repo):
+Create `frontend/.env`:
 ```env
 VITE_SYNOX_ADDRESS=0x29f4145fFfd81E8e72c813AFd133B4C38106E4d7
 VITE_NFT_ADDRESS=0xDF80d2c1bBb114a526aF5bE22E30db9Bbe31363B
-# Optional: Add VITE_PINATA_JWT for real IPFS uploads
-```
-
-### 5. Start the Application
-```bash
-npm run dev
-```
-Visit `http://localhost:5173` in your browser.
-
----
-
-## 📖 Usage Guide
-
-1.  **Connect Wallet**: Click "Connect Wallet" on the landing page. Ensure you are on Sepolia network.
-2.  **Create Meeting**: Go to Dashboard -> Enter Title -> Click "Create". Confirm the transaction in MetaMask.
-3.  **Join Room**: Click "Join Room" on the meeting card. Allow camera/mic access.
-4.  **Invite Others**: Share the Meeting ID with others (they must also be on localhost for this demo).
-5.  **Finalize Meeting (Host Only)**:
-    -   Click "Finalize & Mint NFTs" in the bottom bar.
-    -   Wait for encryption, IPFS upload, and blockchain confirmation.
-    -   Participants will receive their Attendance NFTs.
-6.  **Verify**: Go to the "Verify" page to check meeting authenticity using the ID and Hash.
-7.  **Governance**: Use your earned NFTs to vote on proposals in the "Governance" tab.
-
----
-
-## 📂 Project Structure
-
-```
-SYNOX/
-├── contracts/          # Solidity Smart Contracts
-│   ├── SyNox.sol       # Main logic
-│   └── SyNoxNFT.sol    # NFT logic
-├── frontend/           # React Application
-│   ├── src/
-│   │   ├── components/ # UI Components
-│   │   ├── pages/      # Application Pages
-│   │   ├── utils/      # Web3 & IPFS Utilities
-│   │   └── hooks/      # Custom React Hooks
-├── signaling/          # WebRTC Signaling Server
-│   └── server.js       # Socket.io implementation
-├── scripts/            # Deployment Scripts
-└── README.md           # Documentation
+VITE_SIGNALING_URL=http://localhost:5000
 ```
 
 ---
 
-## 📄 License
+## 📖 Using the Protocol
 
-This project is licensed under the MIT License.
+1.  **Dashboard**: Create a "New Session" or join by entering a "Room ID" and your "Alias".
+2.  **Lobby**: Users wait in a secure lobby. The Host receives a notification in the sidebar to "Approve" or "Deny" entry.
+3.  **The Mesh**: Once admitted, use the controls to Mute, Toggle Camera, Share Screen, or Raise Hand.
+4.  **Finalize**: Host clicks "Finalize Session" to upload the recording metadata to IPFS and mint reputation NFTs for all.
+5.  **Verify**: Anyone can enter a CID/ID into the Verify page to see if the session record is valid and untampered.
+
+---
+
+## 📄 Documentation
+
+For a simpler explanation of how this project works and what tools we used, check out [EXPLANATION.md](./EXPLANATION.md).
 
 ---
 

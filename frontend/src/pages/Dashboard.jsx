@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { ethers } from 'ethers';
 import { SYNOX_ADDRESS, SYNOX_ABI } from '../utils/contract';
-import { Plus, Check, Clock, ExternalLink, Share2, Copy, ShieldCheck, ShieldAlert, Play, X, Lock, Unlock, Zap, Hash, Globe, Activity } from 'lucide-react';
+import { Plus, Check, Clock, ExternalLink, Share2, Copy, ShieldCheck, ShieldAlert, Play, X, Lock, Unlock, Zap, Hash, Globe, Activity, Users } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 
@@ -14,6 +14,8 @@ const Dashboard = () => {
     const [initialLoading, setInitialLoading] = useState(true);
     const [copiedId, setCopiedId] = useState(null);
     const [manualHuddleId, setManualHuddleId] = useState("");
+    const [joinId, setJoinId] = useState("");
+    const [joinName, setJoinName] = useState("");
     const { showToast } = useToast();
     const [playbackUrl, setPlaybackUrl] = useState(null);
     const [viewingRecording, setViewingRecording] = useState(null);
@@ -138,10 +140,14 @@ const Dashboard = () => {
         if (!title || !signer) return;
         setLoading(true);
         try {
-            const huddleId = manualHuddleId || `synox09-${Math.random().toString(36).substring(7)}`;
-
             const contract = new ethers.Contract(SYNOX_ADDRESS, SYNOX_ABI, signer);
-            const tx = await contract.createMeeting(title, huddleId);
+            const generateId = () => {
+                const p1 = Math.random().toString(36).substring(2, 5);
+                const p2 = Math.random().toString(36).substring(2, 6);
+                const p3 = Math.random().toString(36).substring(2, 5);
+                return `${p1}-${p2}-${p3}`;
+            };
+            const tx = await contract.createMeeting(title, manualHuddleId || generateId());
             await tx.wait();
 
             setTitle("");
@@ -169,23 +175,51 @@ const Dashboard = () => {
                     </p>
                 </div>
 
-                <div className="flex flex-col sm:flex-row w-full lg:w-auto gap-4 items-stretch sm:items-center bg-zinc-900/40 p-3 rounded-2xl backdrop-blur-xl border border-white/10 focus-within:border-white/20 transition-all shadow-2xl">
+                <div className="flex flex-col xl:flex-row w-full lg:w-auto gap-4 items-stretch xl:items-center bg-zinc-900/40 p-3 rounded-2xl backdrop-blur-xl border border-white/10 focus-within:border-white/20 transition-all shadow-2xl">
                     {!isArchiveView && (
                         <>
-                            <input
-                                value={title}
-                                onChange={(e) => setTitle(e.target.value)}
-                                placeholder="SESSION NAME..."
-                                className="bg-transparent px-4 py-3 w-full sm:w-48 text-xs font-black tracking-widest text-white focus:outline-none placeholder:text-gray-700 uppercase"
-                            />
-                            <button
-                                onClick={createMeeting}
-                                disabled={loading || !account}
-                                className="bg-white text-black px-8 py-3 rounded-xl font-black hover:bg-zinc-200 transition-all text-[10px] tracking-[0.2em] flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                            >
-                                {loading ? <Clock className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                                {loading ? "INITIALIZING..." : "CREATE ROOM"}
-                            </button>
+                            <div className="flex items-center gap-2 px-4 border-r border-white/5">
+                                <Plus size={14} className="text-gray-500" />
+                                <input
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
+                                    placeholder="SESSION NAME..."
+                                    className="bg-transparent py-3 w-40 text-xs font-black tracking-widest text-white focus:outline-none placeholder:text-gray-700 uppercase"
+                                />
+                                <button
+                                    onClick={createMeeting}
+                                    disabled={loading || !account}
+                                    className="bg-white text-black px-6 py-2.5 rounded-xl font-black hover:bg-zinc-200 transition-all text-[10px] tracking-[0.2em] whitespace-nowrap"
+                                >
+                                    {loading ? <Clock className="w-4 h-4 animate-spin" /> : "NEW"}
+                                </button>
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-1">
+                                <Users size={14} className="text-gray-500 ml-4" />
+                                <input
+                                    value={joinId}
+                                    onChange={(e) => setJoinId(e.target.value)}
+                                    placeholder="ROOM ID..."
+                                    className="bg-transparent px-4 py-3 min-w-[120px] text-xs font-black tracking-widest text-white focus:outline-none placeholder:text-gray-700 uppercase"
+                                />
+                                <input
+                                    value={joinName}
+                                    onChange={(e) => setJoinName(e.target.value)}
+                                    placeholder="YOUR NAME..."
+                                    className="bg-transparent px-4 py-3 min-w-[120px] text-xs font-black tracking-widest text-blue-400 focus:outline-none placeholder:text-gray-700 uppercase"
+                                />
+                                <button
+                                    onClick={() => {
+                                        if (joinId) {
+                                            navigate(`/room/${joinId}${joinName ? '?name=' + encodeURIComponent(joinName) : ''}`);
+                                        }
+                                    }}
+                                    className="bg-blue-600 text-white px-8 py-2.5 rounded-xl font-black hover:bg-blue-700 transition-all text-[10px] tracking-[0.2em]"
+                                >
+                                    JOIN
+                                </button>
+                            </div>
                         </>
                     )}
                 </div>

@@ -9,8 +9,17 @@ const io = require('socket.io')(server, {
     pingInterval: 25000,
 });
 
-// roomId -> Set of socketIds (Set prevents duplicates automatically)
+// roomId -> { host: socketId, users: Set, pending: Set }
 const rooms = {};
+
+// Map of roomId to unique short meeting ID (like abc-defg-hij)
+const meetingIds = {};
+const meetingIdToRoomId = {};
+
+function generateMeetingId() {
+    const part = () => Math.random().toString(36).substring(2, 6);
+    return `${part()}-${part()}-${part()}`;
+}
 
 app.get('/health', (req, res) => res.json({
     status: 'ok',
@@ -23,35 +32,78 @@ app.get('/health', (req, res) => res.json({
 io.on('connection', (socket) => {
     console.log('[+] Connected:', socket.id);
 
-    socket.on('join-room', (roomId) => {
-        // Initialize room as a Set (no duplicates possible)
-        if (!rooms[roomId]) rooms[roomId] = new Set();
+    socket.on('join-room', ({ roomId, isHost, name }) => {
+        if (!rooms[roomId]) {
+            rooms[roomId] = {
+                host: isHost ? socket.id : null,
+                users: new Set(),
+                pending: new Set(),
+                meetingId: generateMeetingId(),
+                names: {}
+            };
+            meetingIds[roomId] = rooms[roomId].meetingId;
+            meetingIdToRoomId[rooms[roomId].meetingId] = roomId;
+        }
 
-        // If this socket is already in the room, skip (handles reconnect race)
-        if (rooms[roomId].has(socket.id)) {
-            console.log(`[Room ${roomId}] Socket ${socket.id} already in room, skipping`);
+        const room = rooms[roomId];
+        room.names[socket.id] = name || 'Anonymous';
+
+        if (isHost) {
+            room.host = socket.id;
+            console.log(`[Host Joined] ${socket.id} is now boss of ${roomId} (${room.meetingId})`);
+        }
+
+        // Host never needs permission
+        if (isHost || room.host === socket.id) {
+            room.users.add(socket.id);
+            socket._roomId = roomId;
+            socket.emit('meeting-info', { meetingId: room.meetingId, isHost: true });
+
+            // Sync existing users
+            const existing = [...room.users].filter(id => id !== socket.id);
+            if (existing.length > 0) {
+                socket.emit('all-users', existing.map(id => ({ id, name: room.names[id] })));
+            }
             return;
         }
 
-        // Get existing users BEFORE adding the new one
-        const existing = [...rooms[roomId]];
-
-        // Tell the new joiner about ALL existing peers
-        if (existing.length > 0) {
-            socket.emit('all-users', existing);
-            console.log(`[Room ${roomId}] Sent ${existing.length} existing user(s) to ${socket.id}`);
-        }
-
-        // Tell ALL existing peers about the new joiner
-        existing.forEach(userId => {
-            io.to(userId).emit('user-joined', socket.id);
-        });
-
-        // Now add the new socket
-        rooms[roomId].add(socket.id);
+        // Regular users must wait for permission
+        room.pending.add(socket.id);
         socket._roomId = roomId;
+        socket.emit('waiting-for-permission', { meetingId: room.meetingId });
 
-        console.log(`[Room ${roomId}] ${rooms[roomId].size} user(s): [${[...rooms[roomId]].join(', ')}]`);
+        if (room.host) {
+            io.to(room.host).emit('permission-requested', {
+                peerId: socket.id,
+                name: room.names[socket.id]
+            });
+        }
+    });
+
+    socket.on('give-permission', ({ peerId, roomId, approved }) => {
+        const room = rooms[roomId];
+        if (!room || room.host !== socket.id) return;
+
+        if (approved && room.pending.has(peerId)) {
+            room.pending.delete(peerId);
+            room.users.add(peerId);
+
+            io.to(peerId).emit('permission-granted');
+
+            // Notify joiner about ALL existing users
+            const existing = [...room.users].filter(id => id !== peerId);
+            if (existing.length > 0) {
+                io.to(peerId).emit('all-users', existing.map(id => ({ id, name: room.names[id] })));
+            }
+
+            // Notify ALL existing users about the JOINER
+            existing.forEach(userId => {
+                io.to(userId).emit('user-joined', { id: peerId, name: room.names[peerId] });
+            });
+        } else {
+            room.pending.delete(peerId);
+            io.to(peerId).emit('permission-denied');
+        }
     });
 
     // ── WebRTC Signaling ──────────────────────────────────────────────────────
@@ -74,7 +126,7 @@ io.on('connection', (socket) => {
     socket.on('broadcast-status', (payload) => {
         const roomId = payload.roomId || socket._roomId;
         if (!roomId || !rooms[roomId]) return;
-        rooms[roomId].forEach(userId => {
+        rooms[roomId].users.forEach(userId => {
             if (userId !== socket.id) {
                 io.to(userId).emit('peer-status', {
                     from: socket.id,
@@ -88,7 +140,7 @@ io.on('connection', (socket) => {
     socket.on('end-meeting', (payload) => {
         const roomId = payload.roomId || socket._roomId;
         if (!roomId || !rooms[roomId]) return;
-        rooms[roomId].forEach(userId => {
+        rooms[roomId].users.forEach(userId => {
             if (userId !== socket.id) {
                 io.to(userId).emit('meeting-ended');
             }
@@ -99,14 +151,25 @@ io.on('connection', (socket) => {
     socket.on('disconnect', (reason) => {
         console.log(`[-] Disconnected: ${socket.id} (${reason})`);
         Object.keys(rooms).forEach(roomId => {
-            if (rooms[roomId].has(socket.id)) {
-                rooms[roomId].delete(socket.id);
+            const room = rooms[roomId];
+            if (room.users.has(socket.id) || room.pending.has(socket.id)) {
+                room.users.delete(socket.id);
+                room.pending.delete(socket.id);
+                delete room.names[socket.id];
+
+                if (room.host === socket.id) room.host = null;
+
                 // Notify remaining users
-                rooms[roomId].forEach(userId => {
+                room.users.forEach(userId => {
                     io.to(userId).emit('user-left', socket.id);
                 });
-                if (rooms[roomId].size === 0) delete rooms[roomId];
-                console.log(`[Room ${roomId}] Now has ${rooms[roomId]?.size ?? 0} user(s)`);
+                if (room.users.size === 0 && room.pending.size === 0) {
+                    const mid = room.meetingId;
+                    delete meetingIdToRoomId[mid];
+                    delete meetingIds[roomId];
+                    delete rooms[roomId];
+                }
+                console.log(`[Room ${roomId}] Now has ${rooms[roomId]?.users.size ?? 0} user(s)`);
             }
         });
     });

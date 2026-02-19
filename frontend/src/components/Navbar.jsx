@@ -116,7 +116,7 @@ const Navbar = () => {
             <nav className="fixed top-0 left-0 right-0 z-[150] px-6 md:px-8 py-4 flex justify-between items-center glass border-b border-white/5">
                 <Link to="/" className="flex items-center gap-2 group z-[300] relative">
                     <Shield className="w-6 h-6 md:w-8 md:h-8 text-white group-hover:text-gray-300 transition-colors" />
-                    <span className="text-xl md:text-2xl font-bold tracking-[0.2em] text-white group-hover:text-gray-300 transition-colors">SyNox09</span>
+                    <span className="text-xl md:text-2xl font-bold tracking-[0.2em] text-white group-hover:text-gray-300 transition-colors uppercase">SYNOX09</span>
                 </Link>
 
                 {/* Desktop Links */}
@@ -176,7 +176,7 @@ const Navbar = () => {
                     <div className="flex items-center justify-between px-8 pt-8 pb-6 border-b border-white/10">
                         <div className="flex items-center gap-2">
                             <Shield className="w-5 h-5 text-white" />
-                            <span className="text-base font-bold tracking-[0.2em] text-white">SyNox09</span>
+                            <span className="text-base font-bold tracking-[0.2em] text-white">SYNOX09</span>
                         </div>
                         {isAuthenticated && (
                             <div className="px-3 py-1 bg-white/5 border border-white/10 text-white font-black text-[8px] tracking-widest rounded-full flex items-center gap-1.5">
