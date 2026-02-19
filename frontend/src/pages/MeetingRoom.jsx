@@ -102,6 +102,7 @@ const MeetingRoom = () => {
     const [lobbyLoading, setLobbyLoading] = useState(false);
     const [finalizing, setFinalizing] = useState(false);
     const [showSidebar, setShowSidebar] = useState(true);
+    const [sidebarTab, setSidebarTab] = useState("events"); // events, nodes, requests
     const [events, setEvents] = useState([]);
     const [finalTxHash, setFinalTxHash] = useState(null);
     const [isRecording, setIsRecording] = useState(false);
@@ -1122,13 +1123,26 @@ const MeetingRoom = () => {
                                 </div>
 
                                 <div className="bg-white/5 rounded-2xl p-1 mb-8 flex gap-1 border border-white/5 shadow-inner">
-                                    <button className="flex-1 py-3 rounded-xl bg-white text-black font-black text-[10px] tracking-widest uppercase">Events</button>
-                                    <button className="flex-1 py-3 rounded-xl text-zinc-500 font-bold text-[10px] tracking-widest uppercase hover:text-white transition-colors">Nodes</button>
+                                    <button
+                                        onClick={() => setSidebarTab("events")}
+                                        className={`flex-1 py-3 rounded-xl font-black text-[10px] tracking-widest uppercase transition-all ${sidebarTab === 'events' ? 'bg-white text-black' : 'text-zinc-500 hover:text-white'}`}
+                                    >
+                                        Events
+                                    </button>
+                                    <button
+                                        onClick={() => setSidebarTab("nodes")}
+                                        className={`flex-1 py-3 rounded-xl font-black text-[10px] tracking-widest uppercase transition-all ${sidebarTab === 'nodes' ? 'bg-white text-black' : 'text-zinc-500 hover:text-white'}`}
+                                    >
+                                        Nodes
+                                    </button>
                                     {isHost && (
-                                        <button className="flex-1 py-3 rounded-xl text-zinc-500 font-bold text-[10px] tracking-widest uppercase hover:text-white transition-colors relative">
+                                        <button
+                                            onClick={() => setSidebarTab("requests")}
+                                            className={`flex-1 py-3 rounded-xl font-black text-[10px] tracking-widest uppercase transition-all ${sidebarTab === 'requests' ? 'bg-white text-black' : 'text-zinc-500 hover:text-white relative'}`}
+                                        >
                                             Requests
                                             {pendingJoiners.length > 0 && (
-                                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 text-white text-[8px] flex items-center justify-center rounded-full animate-bounce">
+                                                <span className={`absolute -top-1 -right-1 w-4 h-4 text-[8px] flex items-center justify-center rounded-full animate-bounce ${sidebarTab === 'requests' ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'}`}>
                                                     {pendingJoiners.length}
                                                 </span>
                                             )}
@@ -1138,75 +1152,118 @@ const MeetingRoom = () => {
                             </div>
 
                             <div className="flex-1 overflow-y-auto px-6 pb-8 space-y-4 custom-scrollbar">
-                                {/* Join Requests Section for Host */}
-                                {isHost && pendingJoiners.length > 0 && (
-                                    <div className="mb-8 space-y-4">
+                                {sidebarTab === "requests" && isHost && (
+                                    <div className="space-y-4">
                                         <h3 className="text-[10px] font-black tracking-widest text-blue-500 uppercase flex items-center gap-2">
                                             <Users size={12} /> Incoming Protocol Requests ({pendingJoiners.length})
                                         </h3>
-                                        <div className="grid gap-3">
-                                            {pendingJoiners.map(request => (
-                                                <motion.div
-                                                    layout
-                                                    initial={{ opacity: 0, y: 10 }}
-                                                    animate={{ opacity: 1, y: 0 }}
-                                                    key={request.peerId}
-                                                    className="p-4 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-between"
-                                                >
-                                                    <div className="flex items-center gap-3">
-                                                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${request.peerId}`} className="w-8 h-8 rounded-full border border-white/10" />
-                                                        <div>
-                                                            <p className="text-xs font-bold text-white">{request.name}</p>
-                                                            <p className="text-[9px] text-zinc-500 font-mono uppercase tracking-widest">Wants to join</p>
+                                        {pendingJoiners.length > 0 ? (
+                                            <div className="grid gap-3">
+                                                {pendingJoiners.map(request => (
+                                                    <motion.div
+                                                        layout
+                                                        initial={{ opacity: 0, y: 10 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        key={request.peerId}
+                                                        className="p-4 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-between"
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${request.peerId}`} className="w-8 h-8 rounded-full border border-white/10" />
+                                                            <div>
+                                                                <p className="text-xs font-bold text-white">{request.name}</p>
+                                                                <p className="text-[9px] text-zinc-500 font-mono uppercase tracking-widest">Wants to join</p>
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <button
-                                                            onClick={() => {
-                                                                socketRef.current.emit("give-permission", { peerId: request.peerId, roomId: huddleId, approved: true });
-                                                                setPendingJoiners(prev => prev.filter(p => p.peerId !== request.peerId));
-                                                            }}
-                                                            className="p-2 bg-blue-500/20 hover:bg-blue-500 text-blue-500 hover:text-white rounded-xl transition-all"
-                                                        >
-                                                            <ShieldCheck size={16} />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => {
-                                                                socketRef.current.emit("give-permission", { peerId: request.peerId, roomId: huddleId, approved: false });
-                                                                setPendingJoiners(prev => prev.filter(p => p.peerId !== request.peerId));
-                                                            }}
-                                                            className="p-2 bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-white rounded-xl transition-all"
-                                                        >
-                                                            <X size={16} />
-                                                        </button>
-                                                    </div>
-                                                </motion.div>
-                                            ))}
-                                        </div>
-                                        <hr className="border-white/5 my-6" />
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                onClick={() => {
+                                                                    socketRef.current.emit("give-permission", { peerId: request.peerId, roomId: huddleId, approved: true });
+                                                                    setPendingJoiners(prev => prev.filter(p => p.peerId !== request.peerId));
+                                                                }}
+                                                                className="p-2 bg-blue-500/20 hover:bg-blue-500 text-blue-500 hover:text-white rounded-xl transition-all"
+                                                            >
+                                                                <ShieldCheck size={16} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => {
+                                                                    socketRef.current.emit("give-permission", { peerId: request.peerId, roomId: huddleId, approved: false });
+                                                                    setPendingJoiners(prev => prev.filter(p => p.peerId !== request.peerId));
+                                                                }}
+                                                                className="p-2 bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-white rounded-xl transition-all"
+                                                            >
+                                                                <X size={16} />
+                                                            </button>
+                                                        </div>
+                                                    </motion.div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <p className="text-center py-12 text-zinc-600 text-[10px] font-black tracking-widest uppercase">No pending requests</p>
+                                        )}
                                     </div>
                                 )}
-                                {events.map(e => (
-                                    <motion.div
-                                        initial={{ opacity: 0, x: -20 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        key={e.id}
-                                        className="p-5 bg-white/[0.02] rounded-[2rem] border border-white/5 hover:border-blue-500/20 hover:bg-white/[0.04] transition-all group"
-                                    >
-                                        <div className="flex justify-between items-center mb-3">
-                                            <div className="flex items-center gap-2">
-                                                <div className={`w-1.5 h-1.5 rounded-full ${e.type === 'BLOCKCHAIN' ? 'bg-blue-500' : e.type === 'ERROR' ? 'bg-red-500' : 'bg-green-500'}`} />
-                                                <span className="text-[9px] font-black tracking-widest text-zinc-500 uppercase">{e.type}</span>
+
+                                {sidebarTab === "nodes" && (
+                                    <div className="space-y-4">
+                                        <h3 className="text-[10px] font-black tracking-widest text-zinc-400 uppercase">Active Mesh Nodes ({peers.length + 1})</h3>
+                                        <div className="grid gap-3">
+                                            {/* Me Node */}
+                                            <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl flex items-center justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${account}`} className="w-8 h-8 rounded-full border border-blue-500/20" />
+                                                    <div>
+                                                        <p className="text-xs font-bold text-white">{joinName} (You)</p>
+                                                        <p className="text-[8px] text-blue-500 font-mono uppercase tracking-widest">Local Authority</p>
+                                                    </div>
+                                                </div>
+                                                <div className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
                                             </div>
-                                            <span className="text-[9px] font-mono text-zinc-600 group-hover:text-blue-500 transition-colors uppercase">{e.time}</span>
+
+                                            {/* Peer Nodes */}
+                                            {peers.map(peer => {
+                                                const status = remoteStatus[peer.peerID] || {};
+                                                return (
+                                                    <div key={peer.peerID} className="p-4 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-between">
+                                                        <div className="flex items-center gap-4">
+                                                            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${peer.peerID}`} className="w-8 h-8 rounded-full border border-white/10" />
+                                                            <div>
+                                                                <p className="text-xs font-bold text-white tracking-widest uppercase">{status.name || "UNIDENTIFIED NODE"}</p>
+                                                                <p className="text-[8px] text-zinc-500 font-mono uppercase tracking-widest">{peer.peerID.slice(0, 16)}...</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
-                                        <p className="text-[12px] text-zinc-400 font-medium leading-relaxed tracking-tight group-hover:text-zinc-200 transition-colors">{e.msg}</p>
-                                    </motion.div>
-                                ))}
-                                {events.length === 0 && (
-                                    <div className="py-20 flex flex-col items-center opacity-20">
-                                        <Activity className="animate-spin mb-4 w-8 h-8" />
-                                        <p className="text-xs font-mono uppercase tracking-[0.3em] text-white">Synchronizing Binary Logs...</p>
+                                    </div>
+                                )}
+
+                                {sidebarTab === "events" && (
+                                    <div className="space-y-4">
+                                        {events.map((e) => (
+                                            <motion.div
+                                                initial={{ opacity: 0, x: -20 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                key={e.id}
+                                                className="p-5 bg-white/[0.02] rounded-[1.5rem] border border-white/5 hover:border-blue-500/20 hover:bg-white/[0.04] transition-all group"
+                                            >
+                                                <div className="flex justify-between items-center mb-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`w-1.5 h-1.5 rounded-full ${e.type === 'BLOCKCHAIN' ? 'bg-blue-500' : e.type === 'ERROR' ? 'bg-red-500' : 'bg-green-500'}`} />
+                                                        <span className="text-[9px] font-black tracking-widest text-zinc-500 uppercase">{e.type}</span>
+                                                    </div>
+                                                    <span className="text-[9px] font-mono text-zinc-600 group-hover:text-blue-500 transition-colors uppercase">{e.time}</span>
+                                                </div>
+                                                <p className="text-[11px] text-zinc-400 font-medium leading-relaxed tracking-tight group-hover:text-zinc-200 transition-colors uppercase">{e.msg}</p>
+                                            </motion.div>
+                                        ))}
+                                        {events.length === 0 && (
+                                            <div className="py-20 flex flex-col items-center opacity-20">
+                                                <Activity className="animate-spin mb-4 w-8 h-8 text-white" />
+                                                <p className="text-xs font-mono uppercase tracking-[0.3em] text-white text-center">Protocol Ledger: Empty</p>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
