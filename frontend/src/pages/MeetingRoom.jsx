@@ -145,7 +145,7 @@ const MeetingRoom = () => {
     // Hand Raise & Speaking
     const [raisedHands, setRaisedHands] = useState({});
     const [remoteStatus, setRemoteStatus] = useState({});
-    const [isSpeaking, setIsLocalSpeaking] = useState(false);
+    const [isLocalSpeaking, setIsLocalSpeaking] = useState(false);
 
     // Screen Share State
     const [isScreenSharing, setIsScreenSharing] = useState(false);
