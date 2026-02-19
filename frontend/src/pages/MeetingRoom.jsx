@@ -379,16 +379,7 @@ const MeetingRoom = () => {
             showToast(`Protocol Request: ${name} is knocking.`, "info");
         });
 
-        return () => {
-            socket.disconnect();
-        };
-    }, [huddleId, account, isHost, addEvent, showToast]);
-
-    // ── WebRTC Mesh Logic ─────────────────────────────────────────────────────
-    useEffect(() => {
-        const socket = socketRef.current;
-        if (!hasJoined || !socket || !huddleId) return;
-
+        // ── WebRTC Mesh Signaling ──
         socket.on('reconnect', () => {
             addEvent("NETWORK", "Mesh re-synching. Regenerating peers...");
             Object.values(pcsRef.current).forEach(pc => pc.close());
@@ -397,7 +388,6 @@ const MeetingRoom = () => {
             socket.emit("join-room", { roomId: huddleId, isHost, name: account?.slice(0, 8) });
         });
 
-        // ── Joiner receives existing users → initiates offers ──
         socket.on("all-users", (users) => {
             addEvent("NETWORK", `${users.length} peer(s) in room. Establishing connections...`);
             users.forEach(async (user) => {
@@ -427,13 +417,11 @@ const MeetingRoom = () => {
             });
         });
 
-        // ── Existing user notified of new joiner ──
         socket.on("user-joined", ({ id, name }) => {
             addEvent("NETWORK", `Peer join: ${name}`);
             setRemoteStatus(prev => ({ ...prev, [id]: { ...prev[id], name: name } }));
         });
 
-        // ── Receive offer → send answer ──
         socket.on("offer", async (payload) => {
             const { callerID, signal } = payload;
             if (pcsRef.current[callerID]) {
@@ -485,63 +473,12 @@ const MeetingRoom = () => {
             removePeer(userID);
         });
 
-        const ghostSweeper = setInterval(() => {
-            setPeers(prev => {
-                const now = Date.now();
-                const alive = prev.filter(p => {
-                    if (p.stream) return true;
-                    if (!p.addedAt) return true;
-                    if (now - p.addedAt > 15000) {
-                        if (pcsRef.current[p.peerID]) {
-                            pcsRef.current[p.peerID].close();
-                            delete pcsRef.current[p.peerID];
-                        }
-                        return false;
-                    }
-                    return true;
-                });
-                return alive.length !== prev.length ? alive : prev;
-            });
-        }, 5000);
-
-        return () => {
-            clearInterval(ghostSweeper);
-            socket.off("all-users");
-            socket.off("user-joined");
-            socket.off("offer");
-            socket.off("answer");
-            socket.off("ice-candidate");
-            socket.off("user-left");
-            socket.off("reconnect");
-            Object.values(pcsRef.current).forEach(pc => pc.close());
-            pcsRef.current = {};
-            setPeers([]);
-        };
-    }, [hasJoined, huddleId, removePeer, addEvent]);
-
-    // ── Data channel for status/hand (via socket relay) ──────────────────────
-    const broadcastStatus = useCallback((payload) => {
-        if (socketRef.current) {
-            socketRef.current.emit('broadcast-status', {
-                roomId: huddleId,
-                payload: { ...payload, isMobile, name: joinName || account?.slice(0, 8) }
-            });
-        }
-    }, [huddleId, isMobile, account]);
-
-    useEffect(() => {
-        const socket = socketRef.current;
-        if (!socket) return;
         socket.on('peer-status', ({ from, payload }) => {
             setRemoteStatus(prev => ({
                 ...prev,
                 [from]: { ...prev[from], ...payload }
             }));
-
-            // Sync specific states like hand raise and recording status
-            if (payload.hand !== undefined) {
-                setRaisedHands(prev => ({ ...prev, [from]: payload.hand }));
-            }
+            if (payload.hand !== undefined) setRaisedHands(prev => ({ ...prev, [from]: payload.hand }));
             if (payload.isRecording !== undefined) {
                 setIsRecording(payload.isRecording);
                 addEvent("NETWORK", payload.isRecording ? "Host started session recording." : "Session recording stopped.");
@@ -553,16 +490,50 @@ const MeetingRoom = () => {
             showToast("Meeting finalized by host. Redirecting...", "success");
             setTimeout(() => {
                 navigate('/dashboard');
-                // Clean up tracks
                 if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop());
             }, 3000);
         });
 
         return () => {
-            socket?.off('peer-status');
-            socket?.off('meeting-ended');
+            socket.disconnect();
+            Object.values(pcsRef.current).forEach(pc => pc.close());
+            pcsRef.current = {};
+            setPeers([]);
         };
-    }, [hasJoined, navigate, showToast]);
+    }, [huddleId, account, isHost, addEvent, showToast, navigate, createPC, removePeer]);
+
+    // ── Data channel for status/hand (via socket relay) ──────────────────────
+    const broadcastStatus = useCallback((payload) => {
+        if (socketRef.current) {
+            socketRef.current.emit('broadcast-status', {
+                roomId: huddleId,
+                payload: { ...payload, isMobile, name: joinName || account?.slice(0, 8) }
+            });
+        }
+    }, [huddleId, isMobile, account, joinName]);
+
+    // ── Ghost Swiper ───────────────────────────────────────────────────────────
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setPeers(prev => {
+                const now = Date.now();
+                const alive = prev.filter(p => {
+                    if (p.stream) return true;
+                    if (!p.addedAt) return true;
+                    if (now - p.addedAt > 20000) { // 20s grace
+                        if (pcsRef.current[p.peerID]) {
+                            pcsRef.current[p.peerID].close();
+                            delete pcsRef.current[p.peerID];
+                        }
+                        return false;
+                    }
+                    return true;
+                });
+                return alive.length !== prev.length ? alive : prev;
+            });
+        }, 5000);
+        return () => clearInterval(interval);
+    }, []);
 
     const toggleHand = () => {
         const newState = !raisedHands['me'];
@@ -593,6 +564,15 @@ const MeetingRoom = () => {
         }, 300);
         return () => { clearInterval(interval); audioContext.close(); };
     }, [localStream, isAudioOn]);
+
+    useEffect(() => {
+        if (hasJoined) {
+            // Delay broadcast slightly to ensure peers have listeners ready
+            setTimeout(() => {
+                broadcastStatus({ isVideoOn, isAudioOn, isMobile });
+            }, 1000);
+        }
+    }, [hasJoined]);
 
     // ── Toggle Video ──────────────────────────────────────────────────────────
     const toggleVideo = () => {
