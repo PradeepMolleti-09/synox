@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { WalletProvider } from './context/WalletContext';
 import Navbar from './components/Navbar';
 import Landing from './pages/Landing';
@@ -17,10 +17,12 @@ const projectId = import.meta.env.VITE_HUDDLE_PROJECT_ID;
 
 function AppContent() {
   const { account, connectWallet } = useWallet();
+  const location = useLocation();
+  const isMeetingRoom = location.pathname.startsWith('/meeting/') || location.pathname.startsWith('/room/');
 
   return (
     <div className="min-h-screen bg-black text-white font-sans antialiased selection:bg-white selection:text-black">
-      <Navbar account={account} connectWallet={connectWallet} />
+      {!isMeetingRoom && <Navbar account={account} connectWallet={connectWallet} />}
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
